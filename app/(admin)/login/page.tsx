@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { AlertCircle, Loader2, Lock } from 'lucide-react'
 
-export default function PlatformAdminLoginPage() {
+export default function AdminLoginPage() {
   const router = useRouter()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -48,7 +48,7 @@ export default function PlatformAdminLoginPage() {
         return
       }
 
-      router.push('/platform/dashboard')
+      router.push('/admin/dashboard')
       router.refresh()
     } catch (err) {
       setError('An unexpected error occurred')
@@ -57,31 +57,33 @@ export default function PlatformAdminLoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-background">
-      <Card className="w-full max-w-md">
-        <CardHeader className="space-y-2">
-          <div className="flex items-center justify-center gap-2 mb-2">
+    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-background to-muted">
+      <Card className="w-full max-w-md shadow-xl">
+        <CardHeader className="space-y-3 pb-6">
+          <div className="flex items-center justify-center gap-2">
             <Lock className="h-5 w-5 text-primary" />
             <span className="text-xs font-semibold text-primary uppercase tracking-wider">
               Platform Admin
             </span>
           </div>
-          <CardTitle className="text-2xl text-center">Work Worth</CardTitle>
-          <CardDescription className="text-center">
+          <CardTitle className="text-3xl text-center font-bold">Work Worth</CardTitle>
+          <CardDescription className="text-center text-base">
             Vendor Administration Console
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
-              <div className="flex gap-3 p-3 bg-destructive/10 border border-destructive/20 rounded-md">
+              <div className="flex gap-3 p-3 bg-destructive/10 border border-destructive/20 rounded-lg">
                 <AlertCircle className="h-4 w-4 text-destructive flex-shrink-0 mt-0.5" />
                 <p className="text-sm text-destructive">{error}</p>
               </div>
             )}
 
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email" className="text-sm font-medium">
+                Email Address
+              </Label>
               <Input
                 id="email"
                 type="email"
@@ -90,11 +92,14 @@ export default function PlatformAdminLoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 disabled={isLoading}
+                className="h-10"
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password" className="text-sm font-medium">
+                Password
+              </Label>
               <Input
                 id="password"
                 type="password"
@@ -103,23 +108,33 @@ export default function PlatformAdminLoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 disabled={isLoading}
+                className="h-10"
               />
             </div>
 
-            <Button type="submit" className="w-full" disabled={isLoading}>
+            <Button type="submit" className="w-full h-10 font-medium" disabled={isLoading}>
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {isLoading ? 'Signing in...' : 'Sign In'}
             </Button>
-
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full"
-              onClick={() => router.push('/login')}
-            >
-              Tenant User Login
-            </Button>
           </form>
+
+          <div className="relative py-3">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-muted-foreground/20" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-card px-2 text-muted-foreground">Tenant User?</span>
+            </div>
+          </div>
+
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full h-10"
+            onClick={() => router.push('/login')}
+          >
+            Sign in as Organization Member
+          </Button>
         </CardContent>
       </Card>
     </div>

@@ -1,13 +1,15 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Loader2, Building2, Users, Wallet, TrendingUp } from 'lucide-react'
+import { Loader2, Building2, Users, Wallet, TrendingUp, Settings } from 'lucide-react'
 
 export default function DirectorDashboard() {
+  const router = useRouter()
   const [user, setUser] = useState<any>(null)
   const [organization, setOrganization] = useState<any>(null)
   const [stats, setStats] = useState({ members: 0, departments: 0, salary_pool: 0, loan_pool: 0 })
@@ -85,11 +87,22 @@ export default function DirectorDashboard() {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold">Organization Dashboard</h1>
-        <p className="text-muted-foreground mt-2">
-          {organization?.name} • Director View
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Organization Dashboard</h1>
+          <p className="text-muted-foreground mt-2">
+            {organization?.name} • Director View
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-2"
+          onClick={() => router.push('/director/settings')}
+        >
+          <Users className="h-4 w-4" />
+          Manage Team
+        </Button>
       </div>
 
       {/* Key Metrics */}

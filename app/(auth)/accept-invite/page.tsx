@@ -151,65 +151,198 @@ export default function AcceptInvitePage() {
     )
   }
 
+  // Password validation
+  const passwordStrength = {
+    hasLength: password.length >= 12,
+    hasUpper: /[A-Z]/.test(password),
+    hasLower: /[a-z]/.test(password),
+    hasNumber: /[0-9]/.test(password),
+    hasSpecial: /[!@#$%^&*(),.?":{}|<>]/.test(password),
+  }
+  const passwordScore =
+    Object.values(passwordStrength).filter(Boolean).length
+
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-background">
-      <Card className="w-full max-w-md">
-        <CardHeader className="space-y-2">
-          <CardTitle className="text-2xl">Set Up Your Account</CardTitle>
-          <CardDescription>
-            Create a password to activate your {invitation?.organizations?.name} account
+    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-background to-muted">
+      <Card className="w-full max-w-md shadow-xl">
+        <CardHeader className="space-y-3 pb-6">
+          <CardTitle className="text-3xl font-bold">Set Up Your Account</CardTitle>
+          <CardDescription className="text-base">
+            Create a secure password to activate your{' '}
+            <span className="font-semibold text-foreground">
+              {invitation?.organizations?.name}
+            </span>{' '}
+            account
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleAcceptInvite} className="space-y-4">
             {error && (
-              <div className="flex gap-3 p-3 bg-destructive/10 border border-destructive/20 rounded-md">
+              <div className="flex gap-3 p-3 bg-destructive/10 border border-destructive/20 rounded-lg animate-in">
                 <AlertCircle className="h-4 w-4 text-destructive flex-shrink-0 mt-0.5" />
-                <p className="text-sm text-destructive">{error}</p>
+                <p className="text-sm text-destructive font-medium">{error}</p>
               </div>
             )}
 
-            <div className="space-y-2 p-3 bg-muted rounded-md">
-              <p className="text-xs text-muted-foreground">Email</p>
-              <p className="font-semibold">{invitation?.email}</p>
+            {/* Invite Details */}
+            <div className="space-y-3 p-4 bg-muted rounded-lg border border-border">
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  Email Address
+                </p>
+                <p className="font-medium mt-1">{invitation?.email}</p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  Organization Role
+                </p>
+                <p className="font-medium mt-1 text-primary">
+                  {invitation?.roles?.name || 'Member'}
+                </p>
+              </div>
             </div>
 
-            <div className="space-y-2 p-3 bg-muted rounded-md">
-              <p className="text-xs text-muted-foreground">Role</p>
-              <p className="font-semibold">{invitation?.roles?.name}</p>
-            </div>
-
+            {/* Password Input */}
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password" className="text-sm font-semibold">
+                Create Password
+              </Label>
               <Input
                 id="password"
                 type="password"
-                placeholder="••••••••"
+                placeholder="Min 12 chars, uppercase, number, symbol"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 disabled={isLoading}
+                className="h-10 font-mono text-sm"
               />
-              <p className="text-xs text-muted-foreground">At least 6 characters</p>
+
+              {/* Password Strength Indicator */}
+              {password && (
+                <div className="space-y-2">
+                  <div className="flex gap-1">
+                    {[...Array(5)].map((_, i) => (
+                      <div
+                        key={i}
+                        className={`h-1.5 flex-1 rounded-full transition-colors ${
+                          i < passwordScore
+                            ? passwordScore >= 4
+                              ? 'bg-green-600'
+                              : passwordScore >= 3
+                                ? 'bg-yellow-600'
+                                : 'bg-orange-600'
+                            : 'bg-muted-foreground/20'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                  <div className="text-xs space-y-1">
+                    <div
+                      className={`flex items-center gap-2 ${
+                        passwordStrength.hasLength
+                          ? 'text-green-600'
+                          : 'text-muted-foreground'
+                      }`}
+                    >
+                      <span className="text-lg leading-none">
+                        {passwordStrength.hasLength ? '✓' : '○'}
+                      </span>
+                      At least 12 characters
+                    </div>
+                    <div
+                      className={`flex items-center gap-2 ${
+                        passwordStrength.hasUpper
+                          ? 'text-green-600'
+                          : 'text-muted-foreground'
+                      }`}
+                    >
+                      <span className="text-lg leading-none">
+                        {passwordStrength.hasUpper ? '✓' : '○'}
+                      </span>
+                      One uppercase letter
+                    </div>
+                    <div
+                      className={`flex items-center gap-2 ${
+                        passwordStrength.hasLower
+                          ? 'text-green-600'
+                          : 'text-muted-foreground'
+                      }`}
+                    >
+                      <span className="text-lg leading-none">
+                        {passwordStrength.hasLower ? '✓' : '○'}
+                      </span>
+                      One lowercase letter
+                    </div>
+                    <div
+                      className={`flex items-center gap-2 ${
+                        passwordStrength.hasNumber
+                          ? 'text-green-600'
+                          : 'text-muted-foreground'
+                      }`}
+                    >
+                      <span className="text-lg leading-none">
+                        {passwordStrength.hasNumber ? '✓' : '○'}
+                      </span>
+                      One number
+                    </div>
+                    <div
+                      className={`flex items-center gap-2 ${
+                        passwordStrength.hasSpecial
+                          ? 'text-green-600'
+                          : 'text-muted-foreground'
+                      }`}
+                    >
+                      <span className="text-lg leading-none">
+                        {passwordStrength.hasSpecial ? '✓' : '○'}
+                      </span>
+                      One special character (!@#$%^&*)
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
+            {/* Confirm Password */}
             <div className="space-y-2">
-              <Label htmlFor="confirmPassword">Confirm Password</Label>
+              <Label htmlFor="confirmPassword" className="text-sm font-semibold">
+                Confirm Password
+              </Label>
               <Input
                 id="confirmPassword"
                 type="password"
-                placeholder="••••••••"
+                placeholder="Re-enter password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 required
                 disabled={isLoading}
+                className="h-10 font-mono text-sm"
               />
+              {confirmPassword && password !== confirmPassword && (
+                <p className="text-xs text-destructive flex items-center gap-1">
+                  <AlertCircle className="h-3 w-3" />
+                  Passwords do not match
+                </p>
+              )}
             </div>
 
-            <Button type="submit" className="w-full" disabled={isLoading}>
+            <Button
+              type="submit"
+              className="w-full h-10 font-semibold"
+              disabled={
+                isLoading ||
+                password !== confirmPassword ||
+                Object.values(passwordStrength).filter(Boolean).length < 5
+              }
+            >
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {isLoading ? 'Creating account...' : 'Activate Account'}
+              {isLoading ? 'Setting up account...' : 'Activate Account'}
             </Button>
+
+            <p className="text-xs text-muted-foreground text-center">
+              By activating your account, you agree to our Terms of Service
+              and Privacy Policy.
+            </p>
           </form>
         </CardContent>
       </Card>
