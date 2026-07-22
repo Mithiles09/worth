@@ -1,10 +1,11 @@
 import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
+import { AuthProvider } from '@/lib/auth-context'
 
 export const metadata: Metadata = {
-  title: 'v0 App',
-  description: 'Created with v0',
+  title: 'Work Worth - Performance-Based Compensation',
+  description: 'Token-based work tracking and compensation platform',
   generator: 'v0.app',
   icons: {
     icon: [
@@ -39,9 +40,11 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" className="bg-background">
       <body className="antialiased">
-        {children}
+        <AuthProvider>
+          {children}
+        </AuthProvider>
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
     </html>
