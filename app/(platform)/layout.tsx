@@ -4,8 +4,9 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Loader2 } from 'lucide-react'
+import { getPlatformAdmin } from '@/lib/auth-helpers'
 
-export default function AppLayout({
+export default function PlatformLayout({
   children,
 }: {
   children: React.ReactNode
@@ -19,19 +20,15 @@ export default function AppLayout({
       const { data: { user } } = await supabase.auth.getUser()
       
       if (!user) {
-        router.push('/login')
+        router.push('/platform/login')
         return
       }
 
-      // Check if user profile exists in public.users
-      const { data: profile, error } = await supabase
-        .from('users')
-        .select('id, organization_id')
-        .eq('id', user.id)
-        .single()
+      // Check if this user is a platform admin
+      const admin = await getPlatformAdmin(user.id)
 
-      if (error || !profile) {
-        // No profile yet - user needs to accept invitation
+      if (!admin) {
+        // Not a platform admin - redirect to tenant login
         await supabase.auth.signOut()
         router.push('/login')
         return
@@ -52,10 +49,8 @@ export default function AppLayout({
   }
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <main className="flex-1 p-8">
-        {children}
-      </main>
+    <div className="min-h-screen bg-background">
+      {children}
     </div>
   )
 }

@@ -3,49 +3,60 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
-import { Loader2, TrendingUp, AlertCircle, Wallet, Target } from 'lucide-react'
+import { Loader2, Calendar, Briefcase, Wallet, TrendingUp } from 'lucide-react'
 
 export default function MemberDashboard() {
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [profile, setProfile] = useState<any>(null)
+  const [user, setUser] = useState<any>(null)
   const [wallet, setWallet] = useState<any>(null)
+  const [organization, setOrganization] = useState<any>(null)
+  const [isLoading, setIsLoading] = useState(true)
   const supabase = createClient()
 
   useEffect(() => {
-    async function loadData() {
+    async function loadDashboard() {
       try {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) return
+        // Get current auth user
+        const { data: { user: authUser } } = await supabase.auth.getUser()
+        if (!authUser) return
 
         // Get user profile
-        const { data: userProfile } = await supabase
+        const { data: profile } = await supabase
           .from('users')
-          .select('*')
-          .eq('id', user.id)
+          .select('id, email, name, organization_id, org_unit_id, status')
+          .eq('id', authUser.id)
           .single()
 
-        setProfile(userProfile)
+        if (profile) {
+          setUser(profile)
 
-        // Get personal wallet
-        const { data: personalWallet } = await supabase
-          .from('wallets')
-          .select('*')
-          .eq('user_id', user.id)
-          .eq('purpose', 'PERSONAL')
-          .single()
+          // Get organization details
+          const { data: org } = await supabase
+            .from('organizations')
+            .select('id, name, type')
+            .eq('id', profile.organization_id)
+            .single()
 
-        setWallet(personalWallet)
+          if (org) setOrganization(org)
+
+          // Get personal wallet
+          const { data: wallets } = await supabase
+            .from('wallets')
+            .select('id, balance, purpose')
+            .eq('owner_user_id', authUser.id)
+            .eq('purpose', 'PERSONAL')
+            .single()
+
+          if (wallets) setWallet(wallets)
+        }
       } catch (err) {
-        setError('Failed to load dashboard data')
+        console.error('Error loading dashboard:', err)
       } finally {
         setIsLoading(false)
       }
     }
 
-    loadData()
+    loadDashboard()
   }, [supabase])
 
   if (isLoading) {
@@ -58,100 +69,78 @@ export default function MemberDashboard() {
 
   return (
     <div className="space-y-8">
+      {/* Header */}
       <div>
         <h1 className="text-3xl font-bold">My Work</h1>
-        <p className="text-muted-foreground">
-          {profile?.full_name || 'Faculty Member'}
+        <p className="text-muted-foreground mt-2">
+          {organization?.name} • {user?.email}
         </p>
       </div>
 
-      {error && (
-        <Card className="border-destructive/50 bg-destructive/5">
-          <CardContent className="flex gap-3 pt-6">
-            <AlertCircle className="h-5 w-5 text-destructive flex-shrink-0" />
-            <p className="text-destructive">{error}</p>
-          </CardContent>
-        </Card>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Credits Earned</CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold">—</p>
-            <p className="text-xs text-muted-foreground">of required threshold</p>
-          </CardContent>
-        </Card>
-
+      {/* Quick Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Token Balance</CardTitle>
-            <Wallet className="h-4 w-4 text-muted-foreground" />
+            <Wallet className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">{wallet?.balance || 0}</p>
+            <div className="text-2xl font-bold">{wallet?.balance || 0}</div>
             <p className="text-xs text-muted-foreground">WORK tokens</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Tasks</CardTitle>
-            <Target className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Status</CardTitle>
+            <TrendingUp className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">—</p>
-            <p className="text-xs text-muted-foreground">In progress</p>
+            <div className="text-2xl font-bold capitalize">{user?.status || 'Active'}</div>
+            <p className="text-xs text-muted-foreground">Account status</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">This Month</CardTitle>
+            <Calendar className="h-4 w-4 text-blue-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">0%</div>
+            <p className="text-xs text-muted-foreground">Progress to target</p>
           </CardContent>
         </Card>
       </div>
 
-      <Tabs defaultValue="schedule" className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="schedule">Schedule</TabsTrigger>
-          <TabsTrigger value="tasks">My Tasks</TabsTrigger>
-          <TabsTrigger value="history">History</TabsTrigger>
-        </TabsList>
+      {/* Coming Soon Sections */}
+      <Card>
+        <CardHeader>
+          <CardTitle>This Week&apos;s Schedule</CardTitle>
+          <CardDescription>Your structured work assignments</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col items-center justify-center py-12">
+            <Calendar className="h-12 w-12 text-muted-foreground/50 mb-4" />
+            <p className="text-muted-foreground mb-4">No scheduled tasks yet</p>
+            <Button variant="outline">View Calendar</Button>
+          </div>
+        </CardContent>
+      </Card>
 
-        <TabsContent value="schedule" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Weekly Schedule</CardTitle>
-              <CardDescription>Your structured work commitments</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground">No scheduled commitments</p>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="tasks" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Active Commitments</CardTitle>
-              <CardDescription>Track your assigned and nominated tasks</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground">No active tasks</p>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="history" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Task History</CardTitle>
-              <CardDescription>Your completed work and credits earned</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground">No history yet</p>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+      <Card>
+        <CardHeader>
+          <CardTitle>Open Tasks</CardTitle>
+          <CardDescription>Available opportunities to earn tokens</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col items-center justify-center py-12">
+            <Briefcase className="h-12 w-12 text-muted-foreground/50 mb-4" />
+            <p className="text-muted-foreground mb-4">No open tasks at this time</p>
+            <Button variant="outline">Browse Marketplace</Button>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   )
 }

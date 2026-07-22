@@ -35,6 +35,29 @@ export default function DashboardPage() {
         }
 
         setUser({ ...authUser, profile })
+
+        // Fetch user roles and redirect to appropriate dashboard
+        const { data: roles } = await supabase
+          .from('user_roles')
+          .select('roles(scope_level)')
+          .eq('user_id', authUser.id)
+
+        if (roles && roles.length > 0) {
+          const firstRole = roles[0] as any
+          const scopeLevel = firstRole?.roles?.scope_level
+          const routeMap: Record<string, string> = {
+            DIRECTOR: '/director',
+            DEAN: '/dean',
+            ORG_UNIT_LEAD: '/lead',
+            MEMBER: '/member',
+            FINANCE_ADMIN: '/finance',
+          }
+          const path = routeMap[scopeLevel]
+          if (path) {
+            router.push(path)
+            return
+          }
+        }
       } catch (err) {
         setError('An error occurred while loading your profile')
       } finally {

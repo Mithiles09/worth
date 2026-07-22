@@ -1,252 +1,272 @@
-# Work Worth - Implementation Guide
+# WorkLedger Two-Tier Auth & Onboarding Implementation
 
-## Part 1: Scaffolding & UI Architecture - COMPLETED
+This document outlines the complete authentication and onboarding flow that has been implemented.
 
-### What Has Been Built
+## Architecture Overview
 
-#### 1. **Type System** (`lib/types.ts`)
-Complete TypeScript interfaces for all domain entities:
-- Organizations, users, roles, wallets, tokens
-- Tasks, nominations, approvals, loans
-- Compensation policies, rate cards
-- Notifications and audit logs
+### Two-Tier Authentication Model
 
-#### 2. **Authentication & State Management**
-- **Auth Store** (`lib/auth-store.ts`): Zustand-based state management
-- **Auth Context** (`lib/auth-context.tsx`): React context with login/logout
-- **Mock Login Page** (`app/(auth)/login/page.tsx`): Demo accounts for all roles
-  - Director, HOD, Faculty, Finance Admin
-  - Quick role switching for testing
+**Tier 1: Platform Admin (Vendor)**
+- Completely separate auth surface: `/platform/login`
+- Separate Supabase `platform_admins` table (NOT subject to RLS)
+- Controls: organization creation, tenant provisioning, first Director account seeding
+- Route group: `(platform)/*` with dedicated layout and auth checks
 
-#### 3. **Layout Components**
-- **Sidebar** (`components/layout/sidebar.tsx`): Role-aware navigation
-  - Dynamic sidebar items per role
-  - Notification badges, logout button
-  - Context-aware icons and links
-  
-- **Header** (`components/layout/header.tsx`): Top navigation
-  - User profile dropdown
-  - Notifications popover
-  - Context toggle for dual-role users (HOD)
-  
-- **AppLayout** (`components/layout/app-layout.tsx`): Master wrapper
-  - Combines sidebar + header
-  - Manages auth redirects
-
-#### 4. **Shared Components**
-- **ProgressGauge** (`components/shared/progress-gauge.tsx`): Circular progress display
-  - Used for monthly credits tracking
-  - Color-coded by status (success/warning/error)
-  
-- **StatCard** (`components/shared/stat-card.tsx`): KPI display
-  - Flexible variants (default, primary, success, warning, error)
-  - Optional trend indicators
-  - Icon support
-
-#### 5. **Role-Based Pages (All Built)**
-
-##### Member (Faculty) Pages
-- `app/(app)/member/dashboard`: Weekly schedule, progress gauge, token balance
-- `app/(app)/member/marketplace`: Browse unstructured tasks, self-nominate
-- `app/(app)/member/credits`: Month-end decision (salary vs loan request), loan history, debt clearance tasks
-
-##### HOD (Manager) Pages
-- `app/(app)/hod/dashboard`: Team stats, dual-context toggle, pending approvals, open tasks, team member roster
-
-##### Director Pages
-- `app/(app)/director/dashboard`: Institution financials, token flow chart, department heatmap, pending approvals
-
-##### Finance Admin Pages
-- `app/(app)/finance/ledger`: Wallet states, faculty readiness, batch reversal controls, audit log
+**Tier 2: Tenant Users (Director, Dean, OrgUnitLead/Lead, Member, Finance)**
+- Single shared login: `/login` (email + password)
+- Automatic role resolution and redirect after login
+- User profile stored in `public.users` (subject to RLS)
+- Roles assigned via `user_roles` → `roles` junction
+- Roles have `scope_level` that determines dashboard redirect
 
 ---
 
-## Part 2: Backend Integration & Real Data (NEXT STEPS)
+## Database Schema Changes
 
-### Ready to Implement
+Run this SQL migration to add the required tables and triggers:
 
-#### A. **Supabase Schema Setup**
-1. Deploy the canonical SQL schema (already provided in `user_read_only_context`)
-2. Tables to create:
-   - Core: `organizations`, `org_units`, `users`, `roles`, `permissions`
-   - Wallets: `wallets`, `token_transactions`, `loans`
-   - Work: `task_type_definitions`, `tasks`, `nominations`, `task_proofs`
-   - Approvals: `approval_instances`, `approval_actions`
-   - Config: `compensation_policies`, `rate_cards`, `cycle_calendars`
-   - Audit: `audit_logs`, `notifications`
+```bash
+# File: supabase/migrations/add_onboarding_flow.sql
+```
 
-#### B. **API Routes (Server Actions)**
-Create these Next.js Server Actions in `app/api/`:
+### Key Tables Added:
 
-**Authentication & Session:**
-- `POST /api/auth/login` - Validate credentials, issue JWT
-- `POST /api/auth/logout` - Invalidate session
-- `GET /api/auth/session` - Restore session
-
-**Wallet & Token Operations:**
-- `POST /api/wallets/get-balance` - Fetch wallet balance
-- `POST /api/tokens/salary-transfer` - Director approves salary release
-- `POST /api/tokens/loan-issue` - Director issues loan
-- `POST /api/tokens/batch-reverse` - Month-end reversal
-
-**Work & Tasks:**
-- `GET /api/tasks/list` - List open/assigned tasks
-- `POST /api/tasks/nominate` - Self-nominate for unstructured task
-- `POST /api/tasks/submit-proof` - Upload task completion proof
-- `POST /api/tasks/mark-attendance` - Faculty marks class attendance
-
-**Approvals:**
-- `GET /api/approvals/pending` - List pending approvals for user
-- `POST /api/approvals/decide` - Approve/reject with signature
-
-**Loans:**
-- `GET /api/loans/history` - User loan history
-- `POST /api/loans/request` - Raise new loan request
-- `POST /api/loans/repay-progress` - Record debt clearance
-
-#### C. **RLS (Row-Level Security) Policies**
-Implement in Supabase for multi-tenancy:
-- All tables scoped by `organization_id`
-- Users see only their own `wallets`, `tasks`, `loans`
-- HOD can see subordinates' data
-- Director sees entire org
-- Finance sees ledger but not personal details
-
-#### D. **Key Feature Implementations**
-
-**1. Monthly Credit Accrual**
-- Track structured work via attendance marking
-- Verify unstructured work via proof uploads
-- Calculate progress % based on compensation policy
-
-**2. Month-End State Machine**
-Implement the flow shown in state diagram:
-- `ACCRUING` → Faculty completes work
-- `THRESHOLD_CHECK` → Automatic cron job triggers check
-- `SALARY_ELIGIBLE` → If ≥85% → salary button enabled
-- `LOAN_ELIGIBLE` → If <85% → loan button enabled
-- `SALARY_REQUESTED` → Faculty clicks "Initiate"
-- `LEAD_VERIFIED` → HOD verifies attendance
-- `TOKENS_TRANSFERRED` → Director→Faculty wallet
-- `BATCH_REVERSED` → Salary day: Faculty→Director (restores budget)
-- `FIAT_RELEASED` → Finance triggers real bank payroll
-
-**3. Task Marketplace**
-- Show OPEN tasks scoped to user's org_unit
-- Track nominations in real-time
-- Update task status on acceptance/rejection
-- Calculate credits contributed
-
-**4. Approval Workflows**
-- Generalized approval engine (already designed)
-- Support multi-step approvals (HOD → Director → Finance)
-- Record audit trail on every action
-
-**5. Loan Repayment**
-- Track `loans.remaining` balance
-- Link tasks to `debt_clearance_for_loan_id`
-- Decrement remaining on proof verification
-- Auto-mark REPAID when remaining = 0
+1. **`platform_admins`** - Platform vendors only (id, auth_user_id, email, name)
+2. **`invitations`** - Holds pending invites with token, status, expiry
+3. **Trigger: `handle_new_auth_user()`** - Auto-creates `public.users` row when auth user signs up with a matching pending invitation
 
 ---
 
-## File Structure (Current)
+## Authentication Flows
+
+### Flow 1: Platform Admin Login
+1. Navigate to `/platform/login`
+2. Email + password (Supabase Auth)
+3. Middleware checks `platform_admins` table
+4. If verified → `/platform/dashboard` (org list, create new org)
+5. If not verified → redirect to `/login` with error
+
+### Flow 2: Organization Creation (Platform Admin)
+1. Click "New Organization" on `/platform/dashboard`
+2. Enter org name + select template (COLLEGE, MNC_BENCH, GENERIC)
+3. Server action `seed_organization_from_template()`:
+   - Creates `organizations` row
+   - Creates root `org_units` node
+   - Seeds default `roles` (Director, Dean, OrgUnitLead, Member, FinanceAdmin)
+   - Seeds default `task_type_definitions` (e.g., CLASS_SESSION, EVENT_COORDINATION)
+   - Seeds `rate_cards` (token values per task type)
+   - Seeds `approval_chain_definitions`
+4. Create first Director account:
+   - Insert into `invitations` with `role_id = Director`
+   - Send email with `/accept-invite?token=...` link
+
+### Flow 3: Tenant User Accepts Invitation
+1. User receives email with `/accept-invite?token={TOKEN}` link
+2. Page loads invitation details (org name, role, email)
+3. User sets password → Supabase Auth creates `auth.users` row
+4. **Trigger fires:**
+   - Creates `public.users` row with organization_id, org_unit_id, role assignment
+   - Creates personal `wallet(purpose='PERSONAL')`
+   - Marks invitation as `ACCEPTED`
+5. User redirected to `/login`
+6. User logs in with email + password
+
+### Flow 4: Login & Dashboard Redirect
+1. User navigates to `/login`
+2. Enter email + password
+3. On success:
+   - Check if `public.users` row exists for this auth user
+   - If NOT: show "Account not ready" state → "Check your email for invitation"
+   - If EXISTS: 
+     - Fetch user roles
+     - Resolve `role.scope_level` 
+     - Redirect to appropriate dashboard:
+       - `DIRECTOR` → `/director`
+       - `DEAN` → `/dean`
+       - `ORG_UNIT_LEAD` → `/lead`
+       - `MEMBER` → `/member`
+       - `FINANCE_ADMIN` → `/finance`
+
+### Flow 5: Director Invites Team Members
+*Coming soon* - Director settings page with:
+- Single invite form (email, name, role, org_unit)
+- Bulk CSV import
+- Each invite row → `INSERT INTO invitations`
+- Email trigger sends invite link
+
+---
+
+## File Structure
 
 ```
 app/
+├── (platform)/
+│   ├── layout.tsx              ← Platform auth guard
+│   ├── login/page.tsx          ← Platform admin login (separate from tenant)
+│   └── dashboard/page.tsx      ← Org list, create org
 ├── (auth)/
-│   ├── login/page.tsx          # Demo login
-│   └── layout.tsx
-├── (app)/
-│   ├── director/
-│   │   └── dashboard/page.tsx   # Director financial dashboard
-│   ├── hod/
-│   │   └── dashboard/page.tsx   # HOD team & approvals
-│   ├── member/
-│   │   ├── dashboard/page.tsx   # Faculty work tracking
-│   │   ├── marketplace/page.tsx # Browse tasks
-│   │   └── credits/page.tsx     # Month-end decision
-│   ├── finance/
-│   │   └── ledger/page.tsx      # Finance settlement
-│   └── layout.tsx
-├── page.tsx                     # Redirects to /login
-└── layout.tsx                   # Root layout with AuthProvider
-├── globals.css
-
-components/
-├── layout/
-│   ├── sidebar.tsx              # Role-aware navigation
-│   ├── header.tsx               # Top nav + profile
-│   └── app-layout.tsx           # Master wrapper
-├── shared/
-│   ├── progress-gauge.tsx       # Circular progress
-│   └── stat-card.tsx            # KPI cards
-└── ui/                          # shadcn/ui components (pre-installed)
+│   ├── layout.tsx              ← Shared auth layout
+│   ├── login/page.tsx          ← Tenant user login (shared, role-aware redirect)
+│   └── accept-invite/page.tsx  ← Set password, activate account
+└── (app)/
+    ├── layout.tsx              ← Tenant auth guard + profile check
+    ├── dashboard/page.tsx      ← Redirect to role-specific dashboard
+    ├── director/page.tsx       ← Director dashboard (org-wide view)
+    ├── dean/page.tsx           ← Dean dashboard (subtree view)
+    ├── lead/page.tsx           ← OrgUnitLead/HOD dashboard (dual context)
+    ├── member/page.tsx         ← Member/Faculty dashboard
+    └── finance/page.tsx        ← Finance admin dashboard (ledger, batch)
 
 lib/
-├── types.ts                     # All TypeScript interfaces
-├── auth-store.ts                # Zustand store
-├── auth-context.tsx             # React context
-└── utils.ts                     # Helper functions
+├── auth-helpers.ts            ← Auth utility functions
+├── supabase/
+│   ├── client.ts              ← Client-side Supabase
+│   └── server.ts              ← Server-side Supabase
+
+supabase/
+└── migrations/
+    └── add_onboarding_flow.sql ← Database schema + trigger
 ```
 
 ---
 
-## How to Test the Current Build
+## Key Components
 
-1. **Start Dev Server**
-   ```bash
-   pnpm dev
-   ```
+### `lib/auth-helpers.ts`
+Utility functions for auth operations:
+- `getCurrentUser()` - Fetch current user + profile
+- `getUserRoles()` - Get user's roles with scope_level
+- `getOrganizationByUserId()` - Fetch user's org
+- `getPlatformAdmin()` - Check if user is platform admin
+- `createInvitation()` - Create new invite
+- `getInvitationByToken()` - Validate invite token
+- `resolveDashboardRoute()` - Map role to dashboard path
 
-2. **Access Application**
-   - Visit `http://localhost:3000`
-   - Redirects to `/login`
-   - Select demo role (Director, HOD, Faculty, Finance Admin)
-   - Login button is mocked
-   - Explore role-specific dashboards
+### Role-Specific Dashboards
 
-3. **Test Navigation**
-   - Sidebar shows role-appropriate pages
-   - Click any link to navigate
-   - Layouts render correctly with mock data
+**Member (`/member`)**: 
+- Token balance, account status, monthly progress
+- Weekly schedule + open tasks sections
+- Browse marketplace for opportunities
 
----
+**Lead (`/lead`)**:
+- Dual context toggle (Manager vs Employee)
+- Team member stats, pending verifications, performance
+- Manager queue view + Employee work view
 
-## Next: Part 2 Checklist
+**Director (`/director`)**:
+- Organization-wide metrics (members, departments, pools)
+- Four tabs: Structure, Approvals, Settings, Reports
+- Full institution control
 
-- [ ] Deploy Supabase schema
-- [ ] Set environment variables (SUPABASE_URL, SUPABASE_KEY)
-- [ ] Implement auth API routes
-- [ ] Create wallet/token RPC functions
-- [ ] Add real data to task list pages
-- [ ] Wire up approval workflows
-- [ ] Implement month-end cron job
-- [ ] Add loan repayment tracking
-- [ ] Build institution structure editor (Director)
-- [ ] Implement task proof uploads
-- [ ] Add notifications system
-- [ ] Create audit log viewer
+**Dean (`/dean`)**:
+- Subtree dashboard (departments under dean)
+- Escalations from leads
+- Cross-department comparison
 
----
-
-## Key Architectural Decisions
-
-1. **Route Groups by Scope**: `/(director)`, `/(member)`, `/(hod)`, `/(finance)` for clean separation
-2. **Zustand for State**: Lightweight auth state, no Redux overhead
-3. **shadcn/ui Components**: Accessible, customizable, consistent styling
-4. **Mock Data Pattern**: All pages have sample data hardcoded for testing
-5. **Type-First Approach**: Full TypeScript interfaces before backend
-6. **RLS over JWT Claims**: Multi-tenant safety via database policies
-7. **SECURITY_DEFINER Functions**: Atomic transactions for token transfers
+**Finance (`/finance`)**:
+- Salary + Loan pool balances
+- Four tabs: Ledger, Readiness, Batch Process, Reports
+- Month-end batch reversal button (disabled until ready)
 
 ---
 
-## Access Credentials (Demo)
+## Testing the Complete Flow
 
-- **Director**: director@college.edu / password
-- **HOD**: hod@college.edu / password
-- **Faculty**: faculty@college.edu / password
-- **Finance Admin**: finance@college.edu / password
+### 1. Setup Platform Admin
+```sql
+-- Create platform admin manually in Supabase
 
-All routes to same mock auth response; org/role determined by login form selection.
+-- First, create auth user via Supabase dashboard or auth API
+-- Copy the auth.users.id
+
+-- Then insert into platform_admins:
+INSERT INTO platform_admins (auth_user_id, email, name)
+VALUES ('[AUTH_USER_ID]', 'you@workworth.io', 'Vendor Name');
+```
+
+### 2. Create Organization
+1. Go to `/platform/login`
+2. Sign in with platform admin email
+3. Click "New Organization"
+4. Fill form, select template
+5. System creates org + first Director invite
+
+### 3. Director Accepts Invite
+1. Check email for `/accept-invite?token=...` link
+2. Set password
+3. Redirected to `/login`
+4. Sign in with email + password
+5. Automatically redirected to `/director`
+
+### 4. Director Invites Members
+*Coming soon UI, but core flow works via server action*
+
+### 5. Member Accepts & Logs In
+1. Email with invite link
+2. Set password
+3. `handle_new_auth_user()` trigger fires
+4. User profile + wallet created
+5. Logged in → `/member` dashboard
+
+---
+
+## RLS Security Model
+
+- **`platform_admins`**: No RLS (separate from tenant world)
+- **`public.users`**: RLS via `organization_id` (Director can see their org's users only)
+- **`user_roles`**: RLS via user_id foreign key
+- **`organizations`**: RLS via implicit `id` match
+- **`wallets`**: RLS via `organization_id` or `owner_user_id`
+
+---
+
+## Environment Variables
+
+Ensure your `.env.local` has:
+```
+NEXT_PUBLIC_SUPABASE_URL=https://...supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+```
+
+---
+
+## Architecture Decisions
+
+✅ **Single `/login` for all tenant users** - role resolved server-side, routed accordingly
+✅ **Separate `/platform/login`** - completely isolated vendor experience
+✅ **Trigger auto-creates public.users** - decouples auth from profile, invites drive activation
+✅ **Invitation token-based** - no shared secrets, short-lived tokens, expiry + revocation support
+✅ **Role-scoped dashboards** - each role gets its own URL + data scope
+✅ **No localStorage for auth** - Supabase session cookies only
+✅ **RLS enforced server-side** - RLS policies on every table, not client-side filtering
+✅ **Generic routing** - route group naming (`/lead` not `/hod`) prevents template hardcoding
+
+---
+
+## What's NOT Yet Implemented
+
+These are next priorities after core auth flows work:
+
+- [ ] Real email sending for invitations (currently just tokens in logs)
+- [ ] Director invite UI (single + bulk CSV)
+- [ ] Dean/Lead management pages (settings, structure, roles)
+- [ ] Task marketplace integration (browse, nominate, submit proof)
+- [ ] Approval workflow engine (multi-step approvals)
+- [ ] Month-end batch reversal cron + atomic transfer
+- [ ] Loan tracking + debt clearance tasks
+- [ ] Attendance marking + task verification
+- [ ] Audit logs + notifications
+- [ ] On-chain wallet integration (if proceeding with Web3)
+
+---
+
+## Immediate Next Steps
+
+1. **Deploy migration** - Run `supabase/migrations/add_onboarding_flow.sql`
+2. **Seed platform admin** - Insert your admin account
+3. **Test org creation** - Walk through platform admin flow
+4. **Test invite flow** - Accept invite, login, verify redirect
+5. **Add email service** - Replace token logging with Resend/Postmark
+6. **Build Director invite UI** - Settings page with single/bulk form
+7. **Verify RLS** - Ensure users can only see their org's data
