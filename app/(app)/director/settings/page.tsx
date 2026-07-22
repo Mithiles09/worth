@@ -173,11 +173,11 @@ export default function DirectorSettingsPage() {
   }
 
   return (
-    <div className="space-y-8 max-w-4xl">
+    <div className="p-4 sm:p-6 md:p-8 space-y-8 max-w-4xl mx-auto">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold">Team Management</h1>
-        <p className="text-muted-foreground mt-1">
+        <h1 className="text-2xl sm:text-3xl font-bold">Team Management</h1>
+        <p className="text-sm sm:text-base text-muted-foreground mt-1">
           Invite team members to join your organization
         </p>
       </div>
