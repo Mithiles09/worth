@@ -135,6 +135,19 @@ export default function AdminLoginPage() {
           >
             Sign in as Organization Member
           </Button>
+
+          <div className="mt-4 pt-4 border-t border-border text-center text-xs space-y-2">
+            <p className="text-muted-foreground">New platform admin?</p>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => router.push('/admin/signup')}
+              className="text-xs h-8"
+            >
+              Create Organization
+            </Button>
+          </div>
         </CardContent>
       </Card>
     </div>

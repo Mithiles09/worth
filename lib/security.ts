@@ -188,15 +188,6 @@ export function encryptData(data: string, key: string): string {
 }
 
 /**
- * Decrypt sensitive data (client-side)
- */
-export function decryptData(encrypted: string, key: string): string {
-  // This is a simplified example. Use TweetNaCl.js or libsodium in production
-  return Buffer.from(encrypted, 'base64').toString('utf-8')
-}
-
-/**
- * Validate request signature (webhook verification)
  * Use HMAC-SHA256 to verify webhook requests from Supabase, Stripe, etc.
  */
 export function verifyHMACSignature(
@@ -210,6 +201,26 @@ export function verifyHMACSignature(
 
   return signature === expectedSignature
 }
+
+/**
+ * Verify Supabase webhook signature
+ * Uses HMAC-SHA256 with secret stored in environment
+ */
+export function verifyWebhookSignature(
+  payload: string,
+  signature: string,
+  secret: string
+): boolean {
+  const crypto = require('crypto')
+  const expectedSignature = crypto
+    .createHmac('sha256', secret)
+    .update(payload)
+    .digest('base64')
+
+  return signature === expectedSignature
+}
+
+
 
 /**
  * Create audit log entry
