@@ -1,7 +1,6 @@
-import { createClient } from '@/lib/supabase/server'
-import { validateEmail } from '@/lib/security'
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { validateEmail } from '@/lib/security'
 
 export async function POST(req: NextRequest) {
   try {
@@ -29,12 +28,13 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // Initialize clients
+    const supabaseAdmin = await createAdminClient()
     const supabase = await createClient()
 
-    // Check if email already exists in auth
-    const { data: existingAuth } = await supabase.auth.admin.listUsers()
+    // Check if email already exists in auth using admin client
+    const { data: existingAuth } = await supabaseAdmin.auth.admin.listUsers()
     const emailExists = existingAuth?.users?.some(u => u.email === email)
-
     if (emailExists) {
       return NextResponse.json(
         { error: 'Email already registered' },
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
       .from('organizations')
       .select('org_id')
       .eq('name', organizationName.trim())
-      .single()
+      .maybeSingle() // Safer than .single() which throws an error if 0 rows match
 
     if (existingOrg) {
       return NextResponse.json(
@@ -56,8 +56,8 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // 1. Create auth user
-    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+    // 1. Create auth user using the Admin Client
+    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,
       password,
       email_confirm: true, // Auto-confirm admin email
@@ -92,7 +92,7 @@ export async function POST(req: NextRequest) {
     if (orgError || !orgData) {
       console.error('[ORG_ERROR]', orgError)
       // Cleanup: delete auth user if org creation fails
-      await supabase.auth.admin.deleteUser(userId)
+      await supabaseAdmin.auth.admin.deleteUser(userId)
       return NextResponse.json(
         { error: 'Failed to create organization' },
         { status: 500 }
@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
       console.error('[PROFILE_ERROR]', profileError)
       // Cleanup: delete org and auth user if profile creation fails
       await supabase.from('organizations').delete().eq('org_id', orgId)
-      await supabase.auth.admin.deleteUser(userId)
+      await supabaseAdmin.auth.admin.deleteUser(userId)
       return NextResponse.json(
         { error: 'Failed to create user profile' },
         { status: 500 }
