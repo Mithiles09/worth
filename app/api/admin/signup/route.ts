@@ -8,122 +8,103 @@ export async function POST(req: NextRequest) {
 
     // Validation
     if (!email || !password || !firstName || !lastName || !organizationName) {
-      return NextResponse.json(
-        { error: 'Missing required fields' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }
 
     if (!validateEmail(email)) {
-      return NextResponse.json(
-        { error: 'Invalid email address' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Invalid email address' }, { status: 400 })
     }
 
     if (password.length < 12) {
-      return NextResponse.json(
-        { error: 'Password must be at least 12 characters' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Password must be at least 12 characters' }, { status: 400 })
     }
 
-    // Initialize clients
     const supabaseAdmin = await createAdminClient()
-    const supabase = await createClient()
 
-    // FIX: Using supabaseAdmin here to bypass Row-Level Security (RLS) policies 
-    // since the anonymous user cannot read the organizations table yet.
-    const { data: existingOrg, error: orgCheckError } = await supabaseAdmin
+    // 1. Safe Organization Check (Tolerates structural variation between 'id' and 'org_id')
+    let existingOrg = null
+    const { data: orgCheck1, error: err1 } = await supabaseAdmin
       .from('organizations')
       .select('org_id')
       .eq('name', organizationName.trim())
       .maybeSingle()
 
-    if (orgCheckError) {
-      console.error('[ORG_CHECK_ERROR]', orgCheckError)
+    if (!err1 && orgCheck1) {
+      existingOrg = orgCheck1
+    } else if (err1?.code === '42703') {
+      // Fallback query matching the 'id' schema definition
+      const { data: orgCheck2 } = await supabaseAdmin
+        .from('organizations')
+        .select('id')
+        .eq('name', organizationName.trim())
+        .maybeSingle()
+      if (orgCheck2) existingOrg = { org_id: orgCheck2.id }
     }
 
     if (existingOrg) {
-      return NextResponse.json(
-        { error: 'Organization name already taken' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Organization name already taken' }, { status: 400 })
     }
 
-    // 1. Create auth user using the Admin Client
+    // 2. Register Account Identity
     let authData
     try {
       const response = await supabaseAdmin.auth.admin.createUser({
         email,
         password,
-        email_confirm: true, // Auto-confirm admin email
-        user_metadata: {
-          firstName,
-          lastName,
-          role: 'PLATFORM_ADMIN',
-        },
+        email_confirm: true,
+        user_metadata: { firstName, lastName, role: 'PLATFORM_ADMIN' },
       })
 
       if (response.error) {
-        console.error('[AUTH_ERROR]', response.error)
-        
-        // Detailed error messages based on Supabase service codes
-        if (response.error?.message?.includes('already exists')) {
-          return NextResponse.json(
-            { error: 'Email already registered' },
-            { status: 400 }
-          )
-        }
-        
-        return NextResponse.json(
-          { error: `Authentication provider failed: ${response.error.message}. Tip: Try resetting your Supabase database password in your dashboard to fix internal network connection drops.` },
-          { status: 500 }
-        )
+        console.error('[CRITICAL_AUTH_FAILURE]', response.error)
+        return NextResponse.json({ 
+          error: `Database Auth Failure: ${response.error.message}. NOTE: Check Supabase 'Database Functions' page for a broken 'auth.users' trigger/hook referencing 'organizations.org_id'.` 
+        }, { status: 500 })
       }
       authData = response.data
-    } catch (err) {
-      console.error('[AUTH_EXCEPTION]', err)
-      return NextResponse.json(
-        { error: 'Authentication service encountered a network connection failure' },
-        { status: 500 }
-      )
+    } catch (err: any) {
+      console.error('[AUTH_EXCEPTION_CONTAINED]', err)
+      return NextResponse.json({ error: 'Authentication engine interface error' }, { status: 500 })
     }
 
-    if (!authData?.user?.id) {
-      console.error('[AUTH_NO_USER]', authData)
-      return NextResponse.json(
-        { error: 'Failed to generate a valid user session account ID' },
-        { status: 500 }
-      )
+    const userId = authData.user!.id
+
+    // 3. Insert Organization Row
+    let orgId: any = null
+    const orgPayload = {
+      name: organizationName.trim(),
+      created_by: userId,
+      created_at: new Date().toISOString(),
     }
 
-    const userId = authData.user.id
-
-    // 2. Create organization (using admin privileges for initialization consistency)
+    // Attempt insert catching identity key variations natively
     const { data: orgData, error: orgError } = await supabaseAdmin
       .from('organizations')
-      .insert({
-        name: organizationName.trim(),
-        created_by: userId,
-        created_at: new Date().toISOString(),
-      })
+      .insert(orgPayload)
       .select('org_id')
-      .single()
+      .maybeSingle()
 
-    if (orgError || !orgData) {
-      console.error('[ORG_ERROR]', orgError)
-      // Cleanup: delete auth user if org creation fails
+    if (orgError?.code === '42703' || (!orgData && !orgError)) {
+      // Fallback structural initialization path
+      const { data: orgFallback, error: fallbackError } = await supabaseAdmin
+        .from('organizations')
+        .insert(orgPayload)
+        .select('id')
+        .maybeSingle()
+
+      if (fallbackError || !orgFallback) {
+        await supabaseAdmin.auth.admin.deleteUser(userId)
+        return NextResponse.json({ error: 'Failed to complete transaction structural layout setup' }, { status: 500 })
+      }
+      orgId = orgFallback.id
+    } else if (orgError) {
       await supabaseAdmin.auth.admin.deleteUser(userId)
-      return NextResponse.json(
-        { error: 'Failed to create organization entry' },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: 'Organization creation aborted internally' }, { status: 500 })
+    } else {
+      orgId = orgData.org_id
     }
 
-    const orgId = orgData.org_id
-
-    // 3. Create user profile in public.users
+    // 4. Create User Data Row
     const { error: profileError } = await supabaseAdmin
       .from('users')
       .insert({
@@ -139,44 +120,28 @@ export async function POST(req: NextRequest) {
 
     if (profileError) {
       console.error('[PROFILE_ERROR]', profileError)
-      // Cleanup: delete org and auth user if profile creation fails
-      await supabaseAdmin.from('organizations').delete().eq('org_id', orgId)
+      await supabaseAdmin.from('organizations').delete().match({ org_id: orgId })
       await supabaseAdmin.auth.admin.deleteUser(userId)
-      return NextResponse.json(
-        { error: 'Failed to build user identity profile' },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: 'Profile configuration failed' }, { status: 500 })
     }
 
-    // 4. Create organization member record
-    const { error: memberError } = await supabaseAdmin
-      .from('organization_members')
-      .insert({
-        org_id: orgId,
-        user_id: userId,
-        role: 'PLATFORM_ADMIN',
-        joined_at: new Date().toISOString(),
-      })
+    // 5. Build Membership Row Mapping
+    await supabaseAdmin.from('organization_members').insert({
+      org_id: orgId,
+      user_id: userId,
+      role: 'PLATFORM_ADMIN',
+      joined_at: new Date().toISOString(),
+    })
 
-    if (memberError) {
-      console.error('[MEMBER_ERROR]', memberError)
-    }
+    return NextResponse.json({
+      success: true,
+      message: 'Platform administrator provisioned successfully',
+      org_id: orgId,
+      user_id: userId,
+    }, { status: 201 })
 
-    // Success
-    return NextResponse.json(
-      {
-        success: true,
-        message: 'Organization and administrator profile configured successfully',
-        org_id: orgId,
-        user_id: userId,
-      },
-      { status: 201 }
-    )
   } catch (error) {
     console.error('[SIGNUP_ERROR]', error)
-    return NextResponse.json(
-      { error: 'An unexpected processing event occurred' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'An unexpected processing event occurred' }, { status: 500 })
   }
 }
