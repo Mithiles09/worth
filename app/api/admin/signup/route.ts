@@ -21,27 +21,13 @@ export async function POST(req: NextRequest) {
 
     const supabaseAdmin = await createAdminClient()
 
-    // 1. Safe Organization Check (Tolerates structural variation between 'id' and 'org_id')
-    let existingOrg = null
-    const { data: orgCheck1, error: err1 } = await supabaseAdmin
+    // 1. Check if organization name exists
+    const { data: existingOrg, error: orgCheckError } = await supabaseAdmin
       .from('organizations')
-      .select('org_id')
+      .select('*')
       .eq('name', organizationName.trim())
-      .maybeSingle()
 
-    if (!err1 && orgCheck1) {
-      existingOrg = orgCheck1
-    } else if (err1?.code === '42703') {
-      // Fallback query matching the 'id' schema definition
-      const { data: orgCheck2 } = await supabaseAdmin
-        .from('organizations')
-        .select('id')
-        .eq('name', organizationName.trim())
-        .maybeSingle()
-      if (orgCheck2) existingOrg = { org_id: orgCheck2.id }
-    }
-
-    if (existingOrg) {
+    if (existingOrg && existingOrg.length > 0) {
       return NextResponse.json({ error: 'Organization name already taken' }, { status: 400 })
     }
 
@@ -57,9 +43,7 @@ export async function POST(req: NextRequest) {
 
       if (response.error) {
         console.error('[CRITICAL_AUTH_FAILURE]', response.error)
-        return NextResponse.json({ 
-          error: `Database Auth Failure: ${response.error.message}. NOTE: Check Supabase 'Database Functions' page for a broken 'auth.users' trigger/hook referencing 'organizations.org_id'.` 
-        }, { status: 500 })
+        return NextResponse.json({ error: response.error.message }, { status: 500 })
       }
       authData = response.data
     } catch (err: any) {
@@ -69,39 +53,36 @@ export async function POST(req: NextRequest) {
 
     const userId = authData.user!.id
 
-    // 3. Insert Organization Row
-    let orgId: any = null
+    // 3. Insert Organization Row (Robust column mapping)
+    let orgId: string | number | null = null
     const orgPayload = {
       name: organizationName.trim(),
       created_by: userId,
       created_at: new Date().toISOString(),
     }
 
-    // Attempt insert catching identity key variations natively
+    // Select '*' to automatically fetch whichever primary key column exists ('id' or 'org_id')
     const { data: orgData, error: orgError } = await supabaseAdmin
       .from('organizations')
       .insert(orgPayload)
-      .select('org_id')
+      .select('*')
       .maybeSingle()
 
-    if (orgError?.code === '42703' || (!orgData && !orgError)) {
-      // Fallback structural initialization path
-      const { data: orgFallback, error: fallbackError } = await supabaseAdmin
-        .from('organizations')
-        .insert(orgPayload)
-        .select('id')
-        .maybeSingle()
-
-      if (fallbackError || !orgFallback) {
-        await supabaseAdmin.auth.admin.deleteUser(userId)
-        return NextResponse.json({ error: 'Failed to complete transaction structural layout setup' }, { status: 500 })
-      }
-      orgId = orgFallback.id
-    } else if (orgError) {
+    if (orgError || !orgData) {
+      console.error('[ORG_ERROR_DETAILS]', orgError)
+      // Cleanup: delete auth user if org creation fails
       await supabaseAdmin.auth.admin.deleteUser(userId)
-      return NextResponse.json({ error: 'Organization creation aborted internally' }, { status: 500 })
-    } else {
-      orgId = orgData.org_id
+      return NextResponse.json({ 
+        error: `Organization creation aborted internally: ${orgError?.message || 'No data returned'}` 
+      }, { status: 500 })
+    }
+
+    // Dynamically look for either column name from database schema
+    orgId = orgData.org_id || orgData.id
+
+    if (!orgId) {
+      await supabaseAdmin.auth.admin.deleteUser(userId)
+      return NextResponse.json({ error: 'Could not resolve organization primary key identifier column' }, { status: 500 })
     }
 
     // 4. Create User Data Row
@@ -120,19 +101,28 @@ export async function POST(req: NextRequest) {
 
     if (profileError) {
       console.error('[PROFILE_ERROR]', profileError)
+      // Cleanup everything on fail
+      await supabaseAdmin.from('organizations').delete().match({ id: orgId })
       await supabaseAdmin.from('organizations').delete().match({ org_id: orgId })
       await supabaseAdmin.auth.admin.deleteUser(userId)
-      return NextResponse.json({ error: 'Profile configuration failed' }, { status: 500 })
+      return NextResponse.json({ error: `Profile configuration failed: ${profileError.message}` }, { status: 500 })
     }
 
     // 5. Build Membership Row Mapping
-    await supabaseAdmin.from('organization_members').insert({
-      org_id: orgId,
-      user_id: userId,
-      role: 'PLATFORM_ADMIN',
-      joined_at: new Date().toISOString(),
-    })
+    const { error: memberError } = await supabaseAdmin
+      .from('organization_members')
+      .insert({
+        org_id: orgId,
+        user_id: userId,
+        role: 'PLATFORM_ADMIN',
+        joined_at: new Date().toISOString(),
+      })
 
+    if (memberError) {
+      console.error('[MEMBER_ERROR]', memberError)
+    }
+
+    // Return exact matching key name structure for safety
     return NextResponse.json({
       success: true,
       message: 'Platform administrator provisioned successfully',
