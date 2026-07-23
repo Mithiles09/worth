@@ -22,18 +22,13 @@ export async function POST(req: NextRequest) {
     const supabaseAdmin = await createAdminClient()
     const combinedName = `${firstName.trim()} ${lastName.trim()}`
 
-    // 2. Check if organization name exists
+    // 2. Check if organization name exists using a loose select
     const { data: existingOrg, error: orgCheckError } = await supabaseAdmin
       .from('organizations')
-      .select('id')
+      .select('*')
       .eq('name', organizationName.trim())
-      .maybeSingle()
 
-    if (orgCheckError) {
-      console.error('[ORG_CHECK_ERROR]', orgCheckError)
-    }
-
-    if (existingOrg) {
+    if (existingOrg && existingOrg.length > 0) {
       return NextResponse.json({ error: 'Organization name already taken' }, { status: 400 })
     }
 
@@ -59,46 +54,50 @@ export async function POST(req: NextRequest) {
 
     const userId = authData.user!.id
 
-    // 4. Insert Organization Row matching your strict Enum and Constraints
-    // Note: 'type' is required by your schema. Assuming a standard first type like 'ENTERPRISE' or 'ROOT'.
-    // Change 'ENTERPRISE' below if your 'organization_type' enum values are named differently.
+    // 4. Insert Organization Row using a raw select wildcard to avoid structural key bugs
+    // We fetch the entire record back to let the JavaScript mapper figure out what the database named the key.
     const { data: orgData, error: orgError } = await supabaseAdmin
       .from('organizations')
       .insert({
         name: organizationName.trim(),
-        type: 'ENTERPRISE', // Replace with your valid organization_type enum value if needed
+        type: 'ENTERPRISE', 
         template_key: 'GENERIC',
         version: 1,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       })
-      .select('id')
-      .single()
+      .select('*')
+      .maybeSingle()
 
     if (orgError || !orgData) {
       console.error('[ORG_ERROR_DETAILS]', orgError)
-      // Cleanup: delete auth user if org creation fails
       await supabaseAdmin.auth.admin.deleteUser(userId)
       return NextResponse.json({ 
-        error: `Organization creation aborted internally: ${orgError?.message || 'No data returned'}` 
+        error: `Organization creation aborted internally: ${orgError?.message || 'No structural matching data returned from table database row.'}` 
       }, { status: 500 })
     }
 
-    const organizationId = orgData.id
+    // Map whatever the key is named at runtime dynamically
+    const organizationId = orgData.id || orgData.org_id
+
+    if (!organizationId) {
+      await supabaseAdmin.auth.admin.deleteUser(userId)
+      return NextResponse.json({ error: 'Primary key identification mismatch on organization table layout.' }, { status: 500 })
+    }
 
     // 5. Create User Profile in public.users matching your exact schema layout
     const { error: profileError } = await supabaseAdmin
       .from('users')
       .insert({
-        id: userId, // Primary Key map
-        organization_id: organizationId, // References organizations(id)
+        id: userId, 
+        organization_id: organizationId, 
         email: email.trim(),
-        name: combinedName, // Combines first and last name strings
+        name: combinedName, 
         employment_type: 'FULL_TIME',
         progress_percentage: 0.00,
         quality_score: 0.00,
         marketplace_locked: false,
-        skills: JSON.stringify([]),
+        skills: [],
         capacity_hours_weekly: 40,
         status: 'ACTIVE',
         version: 1,
@@ -108,8 +107,8 @@ export async function POST(req: NextRequest) {
 
     if (profileError) {
       console.error('[PROFILE_ERROR]', profileError)
-      // Cleanup transaction elements sequentially on failure
       await supabaseAdmin.from('organizations').delete().eq('id', organizationId)
+      await supabaseAdmin.from('organizations').delete().eq('org_id', organizationId)
       await supabaseAdmin.auth.admin.deleteUser(userId)
       return NextResponse.json({ error: `Profile configuration failed: ${profileError.message}` }, { status: 500 })
     }
