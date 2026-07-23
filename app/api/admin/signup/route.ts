@@ -32,12 +32,17 @@ export async function POST(req: NextRequest) {
     const supabaseAdmin = await createAdminClient()
     const supabase = await createClient()
 
-    // Check if organization name already exists
-    const { data: existingOrg, error: orgCheckError } = await supabase
+    // FIX: Using supabaseAdmin here to bypass Row-Level Security (RLS) policies 
+    // since the anonymous user cannot read the organizations table yet.
+    const { data: existingOrg, error: orgCheckError } = await supabaseAdmin
       .from('organizations')
       .select('org_id')
       .eq('name', organizationName.trim())
       .maybeSingle()
+
+    if (orgCheckError) {
+      console.error('[ORG_CHECK_ERROR]', orgCheckError)
+    }
 
     if (existingOrg) {
       return NextResponse.json(
@@ -59,11 +64,11 @@ export async function POST(req: NextRequest) {
           role: 'PLATFORM_ADMIN',
         },
       })
-      
+
       if (response.error) {
         console.error('[AUTH_ERROR]', response.error)
         
-        // Check if it's a duplicate email error
+        // Detailed error messages based on Supabase service codes
         if (response.error?.message?.includes('already exists')) {
           return NextResponse.json(
             { error: 'Email already registered' },
@@ -72,16 +77,15 @@ export async function POST(req: NextRequest) {
         }
         
         return NextResponse.json(
-          { error: 'Failed to create authentication account: ' + response.error.message },
+          { error: `Authentication provider failed: ${response.error.message}. Tip: Try resetting your Supabase database password in your dashboard to fix internal network connection drops.` },
           { status: 500 }
         )
       }
-      
       authData = response.data
     } catch (err) {
       console.error('[AUTH_EXCEPTION]', err)
       return NextResponse.json(
-        { error: 'Authentication service error' },
+        { error: 'Authentication service encountered a network connection failure' },
         { status: 500 }
       )
     }
@@ -89,15 +93,15 @@ export async function POST(req: NextRequest) {
     if (!authData?.user?.id) {
       console.error('[AUTH_NO_USER]', authData)
       return NextResponse.json(
-        { error: 'Failed to create user account' },
+        { error: 'Failed to generate a valid user session account ID' },
         { status: 500 }
       )
     }
 
-    const userId = authData.user!.id
+    const userId = authData.user.id
 
-    // 2. Create organization
-    const { data: orgData, error: orgError } = await supabase
+    // 2. Create organization (using admin privileges for initialization consistency)
+    const { data: orgData, error: orgError } = await supabaseAdmin
       .from('organizations')
       .insert({
         name: organizationName.trim(),
@@ -112,7 +116,7 @@ export async function POST(req: NextRequest) {
       // Cleanup: delete auth user if org creation fails
       await supabaseAdmin.auth.admin.deleteUser(userId)
       return NextResponse.json(
-        { error: 'Failed to create organization' },
+        { error: 'Failed to create organization entry' },
         { status: 500 }
       )
     }
@@ -120,7 +124,7 @@ export async function POST(req: NextRequest) {
     const orgId = orgData.org_id
 
     // 3. Create user profile in public.users
-    const { error: profileError } = await supabase
+    const { error: profileError } = await supabaseAdmin
       .from('users')
       .insert({
         user_id: userId,
@@ -136,16 +140,16 @@ export async function POST(req: NextRequest) {
     if (profileError) {
       console.error('[PROFILE_ERROR]', profileError)
       // Cleanup: delete org and auth user if profile creation fails
-      await supabase.from('organizations').delete().eq('org_id', orgId)
+      await supabaseAdmin.from('organizations').delete().eq('org_id', orgId)
       await supabaseAdmin.auth.admin.deleteUser(userId)
       return NextResponse.json(
-        { error: 'Failed to create user profile' },
+        { error: 'Failed to build user identity profile' },
         { status: 500 }
       )
     }
 
     // 4. Create organization member record
-    const { error: memberError } = await supabase
+    const { error: memberError } = await supabaseAdmin
       .from('organization_members')
       .insert({
         org_id: orgId,
@@ -162,7 +166,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         success: true,
-        message: 'Organization created successfully',
+        message: 'Organization and administrator profile configured successfully',
         org_id: orgId,
         user_id: userId,
       },
@@ -171,7 +175,7 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error('[SIGNUP_ERROR]', error)
     return NextResponse.json(
-      { error: 'An unexpected error occurred' },
+      { error: 'An unexpected processing event occurred' },
       { status: 500 }
     )
   }
