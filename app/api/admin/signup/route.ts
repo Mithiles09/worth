@@ -55,7 +55,6 @@ export async function POST(req: NextRequest) {
     const userId = authData.user!.id
 
     // 4. Insert Organization Row 
-    // Trying 'ENTERPRISE' but catching lowercase constraints dynamically if they throw errors
     let orgDataResponse = await supabaseAdmin
       .from('organizations')
       .insert({
@@ -96,7 +95,7 @@ export async function POST(req: NextRequest) {
     const organizationId = orgDataResponse.data.id || orgDataResponse.data.org_id
 
     // 5. Create User Profile in public.users
-    // We try uppercase enums first, matching standard database structures
+    // FIX: Using JSON.stringify([]) explicitly so the JSONB Postgres schema column accepts the parameter format safely
     let profileResult = await supabaseAdmin
       .from('users')
       .insert({
@@ -108,7 +107,7 @@ export async function POST(req: NextRequest) {
         progress_percentage: 0.00,
         quality_score: 0.00,
         marketplace_locked: false,
-        skills: [],
+        skills: JSON.stringify([]), // <-- Explicitly stringified for JSONB mapping criteria
         capacity_hours_weekly: 40,
         status: 'ACTIVE',
         version: 1,
@@ -116,7 +115,7 @@ export async function POST(req: NextRequest) {
         updated_at: new Date().toISOString()
       })
 
-    // CRUCIAL RECONCILIATION STEP: If it failed, try lowercase enum inputs ('full_time' / 'active')
+    // Fallback path utilizing alternate case enum arguments
     if (profileResult.error) {
       console.warn('[PROFILE_UPPERCASE_ENUM_FAILED] Retrying with lowercase database enum fields...')
       profileResult = await supabaseAdmin
@@ -130,7 +129,7 @@ export async function POST(req: NextRequest) {
           progress_percentage: 0.00,
           quality_score: 0.00,
           marketplace_locked: false,
-          skills: [],
+          skills: JSON.stringify([]), // <-- Explicitly stringified
           capacity_hours_weekly: 40,
           status: 'active',
           version: 1,
@@ -139,15 +138,14 @@ export async function POST(req: NextRequest) {
         })
     }
 
-    // If both paths failed, bubble up the error code precisely to see exactly which column blocked it
     if (profileResult.error) {
       console.error('[PROFILE_CRITICAL_ERROR]', profileResult.error)
-      // Cleanup to allow re-testing
+      // Cleanup to allow clean re-testing environments
       await supabaseAdmin.from('organizations').delete().eq('id', organizationId)
       await supabaseAdmin.from('organizations').delete().eq('org_id', organizationId)
       await supabaseAdmin.auth.admin.deleteUser(userId)
       return NextResponse.json({ 
-        error: `Profile structural configuration failed: ${profileResult.error.message}. Check fields for foreign key constraints.` 
+        error: `Profile configuration failed: ${profileResult.error.message}. Please inspect backend schema dependencies.` 
       }, { status: 500 })
     }
 
