@@ -32,22 +32,12 @@ export async function POST(req: NextRequest) {
     const supabaseAdmin = await createAdminClient()
     const supabase = await createClient()
 
-    // Check if email already exists in auth using admin client
-    const { data: existingAuth } = await supabaseAdmin.auth.admin.listUsers()
-    const emailExists = existingAuth?.users?.some(u => u.email === email)
-    if (emailExists) {
-      return NextResponse.json(
-        { error: 'Email already registered' },
-        { status: 400 }
-      )
-    }
-
     // Check if organization name already exists
-    const { data: existingOrg } = await supabase
+    const { data: existingOrg, error: orgCheckError } = await supabase
       .from('organizations')
       .select('org_id')
       .eq('name', organizationName.trim())
-      .maybeSingle() // Safer than .single() which throws an error if 0 rows match
+      .maybeSingle()
 
     if (existingOrg) {
       return NextResponse.json(
@@ -57,26 +47,54 @@ export async function POST(req: NextRequest) {
     }
 
     // 1. Create auth user using the Admin Client
-    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true, // Auto-confirm admin email
-      user_metadata: {
-        firstName,
-        lastName,
-        role: 'PLATFORM_ADMIN',
-      },
-    })
-
-    if (authError || !authData?.user) {
-      console.error('[AUTH_ERROR]', authError)
+    let authData
+    try {
+      const response = await supabaseAdmin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true, // Auto-confirm admin email
+        user_metadata: {
+          firstName,
+          lastName,
+          role: 'PLATFORM_ADMIN',
+        },
+      })
+      
+      if (response.error) {
+        console.error('[AUTH_ERROR]', response.error)
+        
+        // Check if it's a duplicate email error
+        if (response.error?.message?.includes('already exists')) {
+          return NextResponse.json(
+            { error: 'Email already registered' },
+            { status: 400 }
+          )
+        }
+        
+        return NextResponse.json(
+          { error: 'Failed to create authentication account: ' + response.error.message },
+          { status: 500 }
+        )
+      }
+      
+      authData = response.data
+    } catch (err) {
+      console.error('[AUTH_EXCEPTION]', err)
       return NextResponse.json(
-        { error: 'Failed to create authentication account' },
+        { error: 'Authentication service error' },
         { status: 500 }
       )
     }
 
-    const userId = authData.user.id
+    if (!authData?.user?.id) {
+      console.error('[AUTH_NO_USER]', authData)
+      return NextResponse.json(
+        { error: 'Failed to create user account' },
+        { status: 500 }
+      )
+    }
+
+    const userId = authData.user!.id
 
     // 2. Create organization
     const { data: orgData, error: orgError } = await supabase

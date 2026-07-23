@@ -22,10 +22,17 @@ export async function createClient() {
 
 // ADMIN client for backend registration tasks (uses Service Role Key)
 export async function createAdminClient() {
+  const url = process.env.SUPABASE_URL
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  
+  if (!url || !serviceRoleKey) {
+    throw new Error('Missing Supabase environment variables: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY')
+  }
+  
   const cookieStore = await cookies()
   return createServerClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!, // <--- Crucial change here
+    url,
+    serviceRoleKey,
     {
       cookies: {
         getAll() { return cookieStore.getAll() },
