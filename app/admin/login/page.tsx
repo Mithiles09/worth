@@ -41,34 +41,31 @@ export default function AdminLoginPage() {
         return
       }
 
-      // FIX: Select everything (*) to absorb dynamic schema column name differences (org_id vs organization_id)
-      const { data: userData, error: userError } = await supabase
-        .from('users')
+      // FIX: Query the correct 'platform_admins' table schema mapping with 'auth_user_id'
+      const { data: adminData, error: adminError } = await supabase
+        .from('platform_admins')
         .select('*')
-        .eq('id', data.user.id)
+        .eq('auth_user_id', data.user.id)
         .maybeSingle()
 
-      if (userError) {
-        console.error('[USER_LOOKUP_ERROR]', userError)
-        setError('Failed to verify user profile database connection')
+      if (adminError) {
+        console.error('[ADMIN_LOOKUP_ERROR]', adminError)
+        setError('Failed to verify platform administrator registry connection')
         await supabase.auth.signOut()
         setIsLoading(false)
         return
       }
 
-      if (!userData) {
-        setError('User profile not found. Please sign up first.')
+      if (!adminData) {
+        setError('Account verified, but no matching platform administrator record exists.')
         await supabase.auth.signOut()
         setIsLoading(false)
         return
       }
 
-      // Extract whatever column is present inside your dynamic session memory structure safely
-      const verifiedOrgId = userData.organization_id || userData.org_id
+      console.log('[LOGIN_SUCCESS_ADMIN]', { adminId: adminData.id, email: adminData.email })
 
-      console.log('[LOGIN_SUCCESS_PROFILE]', { userId: data.user.id, verifiedOrgId })
-
-      // Success - redirect to dashboard safely
+      // Success - redirect to administration dashboard safely
       router.push('/admin/dashboard')
     } catch (err: any) {
       console.error('[LOGIN_EXCEPTION]', err)
