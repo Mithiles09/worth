@@ -1,27 +1,40 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
+// Standard client for normal users (uses Anon Key)
 export async function createClient() {
   const cookieStore = await cookies()
-
-  // On the server, we can read raw, un-prefixed variables directly
-  const url = process.env.SUPABASE_URL!
-  const anonKey = process.env.SUPABASE_ANON_KEY!
-
-  return createServerClient(url, anonKey, {
-    cookies: {
-      getAll() {
-        return cookieStore.getAll()
+  return createServerClient(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() { return cookieStore.getAll() },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options))
+          } catch { }
+        },
       },
-      setAll(cookiesToSet) {
-        try {
-          cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options)
-          )
-        } catch {
-          // The `setAll` method can be ignored if called from a Server Component
-        }
+    }
+  )
+}
+
+// ADMIN client for backend registration tasks (uses Service Role Key)
+export async function createAdminClient() {
+  const cookieStore = await cookies()
+  return createServerClient(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!, // <--- Crucial change here
+    {
+      cookies: {
+        getAll() { return cookieStore.getAll() },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options))
+          } catch { }
+        },
       },
-    },
-  })
+    }
+  )
 }
