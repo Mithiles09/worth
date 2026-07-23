@@ -19,25 +19,32 @@ export default function AdminDashboard() {
     async function loadDashboard() {
       try {
         const { data: { user: authUser } } = await supabase.auth.getUser()
+        
         if (!authUser) {
           router.push('/admin/login')
           return
         }
 
-        // Check if platform admin
-        const { data: adminData } = await supabase
-          .from('platform_admins')
-          .select('id, name, email')
-          .eq('auth_user_id', authUser.id)
+        // Check if user exists in public.users table with PLATFORM_ADMIN context
+        const { data: userData } = await supabase
+          .from('users')
+          .select('id, name, email, organization_id')
+          .eq('id', authUser.id)
           .single()
 
-        if (!adminData) {
+        if (!userData) {
+          // User exists in auth but not in public schema - something went wrong
           await supabase.auth.signOut()
           router.push('/admin/login')
           return
         }
 
-        setAdmin(adminData)
+        setAdmin({
+          id: userData.id,
+          name: userData.name,
+          email: userData.email,
+          organization_id: userData.organization_id,
+        })
 
         // Fetch all organizations
         const { data: orgs } = await supabase
@@ -48,6 +55,8 @@ export default function AdminDashboard() {
         setOrganizations(orgs || [])
       } catch (err) {
         console.error('Error loading admin dashboard:', err)
+        // On error, redirect to login
+        router.push('/admin/login')
       } finally {
         setIsLoading(false)
       }

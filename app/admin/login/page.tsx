@@ -24,34 +24,50 @@ export default function AdminLoginPage() {
 
     try {
       const { data, error: signInError } = await supabase.auth.signInWithPassword({
-        email,
+        email: email.trim(),
         password,
       })
 
       if (signInError) {
-        setError(signInError.message)
+        console.error('[LOGIN_ERROR]', signInError)
+        setError(signInError.message || 'Failed to sign in')
         setIsLoading(false)
         return
       }
 
-      // Check if this is a platform admin
-      const { data: admin, error: adminError } = await supabase
-        .from('platform_admins')
-        .select('id')
-        .eq('auth_user_id', data.user?.id)
-        .single()
+      if (!data.user?.id) {
+        setError('No user found in authentication')
+        setIsLoading(false)
+        return
+      }
 
-      if (adminError || !admin) {
-        setError('Not authorized as a platform admin')
+      // Check if user exists in public.users
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('id, name, organization_id')
+        .eq('id', data.user.id)
+        .maybeSingle()
+
+      if (userError) {
+        console.error('[USER_LOOKUP_ERROR]', userError)
+        setError('Failed to verify user profile')
         await supabase.auth.signOut()
         setIsLoading(false)
         return
       }
 
+      if (!userData) {
+        setError('User profile not found. Please sign up first.')
+        await supabase.auth.signOut()
+        setIsLoading(false)
+        return
+      }
+
+      // Success - redirect to dashboard
       router.push('/admin/dashboard')
-      router.refresh()
-    } catch (err) {
-      setError('An unexpected error occurred')
+    } catch (err: any) {
+      console.error('[LOGIN_EXCEPTION]', err)
+      setError(err?.message || 'An unexpected error occurred')
       setIsLoading(false)
     }
   }
