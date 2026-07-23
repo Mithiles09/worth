@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
 import { validateEmail } from '@/lib/security'
+import { randomUUID } from 'crypto' // <-- Native Node.js module to generate UUIDs
 
 export async function POST(req: NextRequest) {
   try {
@@ -48,10 +49,15 @@ export async function POST(req: NextRequest) {
 
     const userId = authData.user.id
 
+    // FIX: Generate a secure UUIDv4 identifier directly inside Next.js 
+    // to bypass missing database column default value generation traps
+    const generatedOrgId = randomUUID()
+
     // 4. Provision primary tenant block structure matching enum constraints
     const { data: orgData, error: orgError } = await supabaseAdmin
       .from('organizations')
       .insert({
+        org_id: generatedOrgId, // <-- Explicitly provided primary key string
         name: organizationName.trim(),
         type: 'ENTERPRISE', // Matches custom type options explicitly [Page 8]
         template_key: 'GENERIC',
@@ -60,20 +66,22 @@ export async function POST(req: NextRequest) {
         updated_at: new Date().toISOString()
       })
       .select('org_id')
-      .single()
+      .maybeSingle()
 
-    if (orgError || !orgData) {
-      console.error('[ORG_WRITE_ERROR]', orgError)
+    if (orgError) {
+      console.error('[ORG_WRITE_ERROR_DETAILS]', orgError)
       await supabaseAdmin.auth.admin.deleteUser(userId)
-      return NextResponse.json({ error: 'Organization storage partition allocation crashed.' }, { status: 500 })
+      return NextResponse.json({ error: `Organization allocation crashed: ${orgError.message}` }, { status: 500 })
     }
 
-    const tenantOrgId = orgData.org_id
+    // Capture the primary key fallback sequence
+    const tenantOrgId = orgData?.org_id || generatedOrgId
 
     // 5. Build core entity rows into platform_admins instead of normal tenancy partitions
     const { error: adminTableError } = await supabaseAdmin
       .from('platform_admins')
       .insert({
+        id: randomUUID(), // Generates an id row for platform_admins primary key constraint [Page 8]
         auth_user_id: userId, // Maps cleanly to your Page 8 column layout criteria
         email: email.trim(),
         name: combinedName,
@@ -82,10 +90,9 @@ export async function POST(req: NextRequest) {
 
     if (adminTableError) {
       console.error('[PLATFORM_ADMIN_TABLE_CRASH]', adminTableError)
-      // Sequential transaction rollbacks
       await supabaseAdmin.from('organizations').delete().eq('org_id', tenantOrgId)
       await supabaseAdmin.auth.admin.deleteUser(userId)
-      return NextResponse.json({ error: 'Failed to bind security roles to platform administrative registries.' }, { status: 500 })
+      return NextResponse.json({ error: `Failed to bind platform administrative registries: ${adminTableError.message}` }, { status: 500 })
     }
 
     // 6. Build mirrored entry inside global users for dashboard statistics consistency
@@ -108,8 +115,7 @@ export async function POST(req: NextRequest) {
       })
 
     if (userTableError) {
-      console.error('[WARNING_USERS_FALLBACK_SKIPPED]', userTableError)
-      // Non-blocking fallback warning, allowing entry completion
+      console.warn('[WARNING_USERS_FALLBACK_SKIPPED] Profile cross-link mapping bypassed:', userTableError.message)
     }
 
     return NextResponse.json({
