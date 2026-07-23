@@ -41,16 +41,16 @@ export default function AdminLoginPage() {
         return
       }
 
-      // Check if user exists in public.users
+      // FIX: Select everything (*) to absorb dynamic schema column name differences (org_id vs organization_id)
       const { data: userData, error: userError } = await supabase
         .from('users')
-        .select('id, name, organization_id')
+        .select('*')
         .eq('id', data.user.id)
         .maybeSingle()
 
       if (userError) {
         console.error('[USER_LOOKUP_ERROR]', userError)
-        setError('Failed to verify user profile')
+        setError('Failed to verify user profile database connection')
         await supabase.auth.signOut()
         setIsLoading(false)
         return
@@ -63,11 +63,16 @@ export default function AdminLoginPage() {
         return
       }
 
-      // Success - redirect to dashboard
+      // Extract whatever column is present inside your dynamic session memory structure safely
+      const verifiedOrgId = userData.organization_id || userData.org_id
+
+      console.log('[LOGIN_SUCCESS_PROFILE]', { userId: data.user.id, verifiedOrgId })
+
+      // Success - redirect to dashboard safely
       router.push('/admin/dashboard')
     } catch (err: any) {
       console.error('[LOGIN_EXCEPTION]', err)
-      setError(err?.message || 'An unexpected error occurred')
+      setError(err?.message || 'An unexpected error occurred during login verification')
       setIsLoading(false)
     }
   }
