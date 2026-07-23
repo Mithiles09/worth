@@ -25,56 +25,41 @@ export default function AdminDashboard() {
           return
         }
 
-        // FIX: Fetch everything (*) defensively to absorb schema column differences (org_id vs organization_id)
-        // Also swapped .single() to .maybeSingle() to prevent silent catch crashes if user profile is missing
-        const { data: userData, error: userError } = await supabase
-          .from('users')
+        // FIX: Match the authentic structural table layout documented on Page 8
+        const { data: adminData, error: adminError } = await supabase
+          .from('platform_admins')
           .select('*')
-          .eq('id', authUser.id)
+          .eq('auth_user_id', authUser.id)
           .maybeSingle()
 
-        if (userError) {
-          console.error('[DASHBOARD_PROFILE_ERROR]', userError)
-          setSchemaError('Database communication error while loading admin profile details.')
+        if (adminError) {
+          console.error('[DASHBOARD_REGISTRY_ERROR]', adminError)
+          setSchemaError('Database communication error occurred while reading platform records.')
           setIsLoading(false)
           return
         }
 
-        if (!userData) {
-          console.warn('[DASHBOARD_NO_PROFILE] Auth user exists but profile table row is missing.')
-          setSchemaError(`Account authenticated successfully, but no matching row was found in your public 'users' table. Tip: Run a fresh signup test.`)
+        if (!adminData) {
+          setSchemaError(`Profile synchronization incomplete: Identity missing from 'platform_admins' database registries.`)
           setIsLoading(false)
           return
         }
-
-        // Map whatever column is available inside your database schema dynamically
-        const verifiedOrgId = userData.organization_id || userData.org_id
 
         setAdmin({
-          id: userData.id,
-          name: userData.name || userData.email,
-          email: userData.email,
-          organization_id: verifiedOrgId,
+          id: adminData.id,
+          name: adminData.name,
+          email: adminData.email,
         })
 
-        // Fetch all organizations safely using a wildcard mapping select
-        const { data: orgs, error: orgsError } = await supabase
+        // Fetch all customer networks across your systems [Page 1]
+        const { data: orgs } = await supabase
           .from('organizations')
           .select('*')
 
-        if (orgsError) {
-          console.error('[DASHBOARD_ORGS_FETCH_ERROR]', orgsError)
-        }
-
-        // Sort descending by creation timestamp via JavaScript engine to avoid remote sorting syntax errors
-        const sortedOrgs = (orgs || []).sort((a: any, b: any) => {
-          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        })
-
-        setOrganizations(sortedOrgs)
+        setOrganizations(orgs || [])
       } catch (err) {
-        console.error('Unexpected exception loading admin dashboard:', err)
-        setSchemaError('An unhandled app runtime boundary crash occurred.')
+        console.error('Unexpected exception loading admin metrics:', err)
+        setSchemaError('An unhandled system component boundary exception occurred.')
       } finally {
         setIsLoading(false)
       }
@@ -97,7 +82,6 @@ export default function AdminDashboard() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Top Navigation */}
       <nav className="border-b border-border bg-card">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
@@ -107,10 +91,10 @@ export default function AdminDashboard() {
             </div>
             <div className="flex items-center gap-4">
               <div className="text-right text-sm">
-                <p className="font-medium">{admin?.name || admin?.email || 'Administrator'}</p>
+                <p className="font-medium">{admin?.name}</p>
                 <p className="text-xs text-muted-foreground">Platform Admin</p>
               </div>
-              <Button variant="outline" size="sm" onClick={handleLogout} className="gap-2" >
+              <Button variant="outline" size="sm" onClick={handleLogout} className="gap-2">
                 <LogOut className="h-4 w-4" /> Sign Out
               </Button>
             </div>
@@ -118,20 +102,14 @@ export default function AdminDashboard() {
         </div>
       </nav>
 
-      {/* Main Content Area */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {schemaError && (
           <div className="mb-6 flex gap-3 p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive">
             <AlertCircle className="h-5 w-5 flex-shrink-0 mt-0.5" />
             <div>
-              <h3 className="font-bold text-sm">Profile Synchronization Alert</h3>
+              <h3 className="font-bold text-sm">Access Synchronization Notice</h3>
               <p className="text-xs mt-1 text-muted-foreground">{schemaError}</p>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={handleLogout} 
-                className="mt-3 text-xs text-destructive border-destructive/20 hover:bg-destructive/10 h-8"
-              >
+              <Button variant="outline" size="sm" onClick={handleLogout} className="mt-3 text-xs text-destructive border-destructive/20 hover:bg-destructive/10 h-8">
                 Return to Login Page
               </Button>
             </div>
@@ -148,9 +126,7 @@ export default function AdminDashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-2xl font-bold">Organizations</h2>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Manage all customer organizations
-                </p>
+                <p className="text-sm text-muted-foreground mt-1">Manage customer companies</p>
               </div>
               <Button className="gap-2" disabled={!!schemaError}>
                 <Plus className="h-4 w-4" /> New Organization
@@ -161,66 +137,53 @@ export default function AdminDashboard() {
               <Card>
                 <CardContent className="flex flex-col items-center justify-center py-12">
                   <Building2 className="h-12 w-12 text-muted-foreground/50 mb-4" />
-                  <p className="text-muted-foreground mb-4">
-                    No organizations registered on the platform yet
-                  </p>
+                  <p className="text-muted-foreground mb-4">No organizations active yet</p>
                   <Button disabled={!!schemaError}>Create First Organization</Button>
                 </CardContent>
               </Card>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {organizations.map((org) => {
-                  const targetOrgId = org.id || org.org_id
-                  const rawType = org.type || 'ENTERPRISE'
-                  
-                  return (
-                    <Card key={targetOrgId} className="hover:shadow-lg transition-shadow">
-                      <CardHeader className="pb-3">
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <CardTitle className="text-lg">{org.name}</CardTitle>
-                            <CardDescription className="text-xs mt-1 uppercase tracking-wider text-primary font-semibold">
-                              {rawType.replace('_', ' ')}
-                            </CardDescription>
-                          </div>
-                          <Building2 className="h-5 w-5 text-muted-foreground" />
+                {organizations.map((org) => (
+                  <Card key={org.org_id} className="hover:shadow-lg transition-shadow">
+                    <CardHeader className="pb-3">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <CardTitle className="text-lg">{org.name}</CardTitle>
+                          <CardDescription className="text-xs mt-1 uppercase text-primary font-semibold">
+                            {(org.type || 'GENERIC').replace('_', ' ')}
+                          </CardDescription>
                         </div>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="text-xs text-muted-foreground mb-4">
-                          Registered:{' '}
-                          {org.created_at ? new Date(org.created_at).toLocaleDateString() : 'N/A'}
-                        </div>
-                        <Button variant="outline" className="w-full text-xs">
-                          Manage Organization
-                        </Button>
-                      </CardContent>
-                    </Card>
-                  )
-                })}
+                        <Building2 className="h-5 w-5 text-muted-foreground" />
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-xs text-muted-foreground mb-4">
+                        Registered: {new Date(org.created_at).toLocaleDateString()}
+                      </div>
+                      <Button variant="outline" className="w-full text-xs">Manage Organization</Button>
+                    </CardContent>
+                  </Card>
+                ))}
               </div>
             )}
           </TabsContent>
           
           <TabsContent value="settings" className="space-y-6 mt-6">
-            <div>
-              <h2 className="text-2xl font-bold mb-4">Platform Settings</h2>
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Account Information</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Name</p>
-                    <p className="font-medium">{admin?.name || 'Not set'}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Email Address</p>
-                    <p className="font-medium">{admin?.email || 'N/A'}</p>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">System Operator Details</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Admin Reference Identity</p>
+                  <p className="font-medium">{admin?.id}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Verified Email Channel</p>
+                  <p className="font-medium">{admin?.email}</p>
+                </div>
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       </main>
