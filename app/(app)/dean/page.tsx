@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -8,67 +9,78 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Loader2, Building2, Users, TrendingUp, AlertCircle } from 'lucide-react'
 
 export default function DeanDashboard() {
+  const router = useRouter()
   const [user, setUser] = useState<any>(null)
-  const [unit, setUnit] = useState<any>(null)
-  const [stats, setStats] = useState({ subdepts: 0, total_members: 0 })
+  const [organization, setOrganization] = useState<any>(null)
+  const [stats, setStats] = useState({ totalDepartments: 0, totalMembers: 0, activeApprovals: 0 })
+  const [departments, setDepartments] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const supabase = createClient()
 
   useEffect(() => {
     async function loadDashboard() {
       try {
-        // Get current auth user
         const { data: { user: authUser } } = await supabase.auth.getUser()
-        if (!authUser) return
+        if (!authUser) {
+          router.push('/login')
+          return
+        }
 
         // Get user profile
         const { data: profile } = await supabase
           .from('users')
-          .select('id, email, name, organization_id, org_unit_id')
+          .select('id, email, name, organization_id')
           .eq('id', authUser.id)
           .single()
 
         if (profile) {
           setUser(profile)
 
-          // Get org unit details
-          if (profile.org_unit_id) {
-            const { data: orgUnit } = await supabase
-              .from('org_units')
-              .select('id, name, parent_id')
-              .eq('id', profile.org_unit_id)
-              .single()
+          // Get organization details
+          const { data: org } = await supabase
+            .from('organizations')
+            .select('id, name, type')
+            .eq('id', profile.organization_id)
+            .single()
 
-            if (orgUnit) setUnit(orgUnit)
+          if (org) setOrganization(org)
 
-            // Get child departments
-            const { data: childDepts } = await supabase
-              .from('org_units')
-              .select('id')
-              .eq('parent_id', profile.org_unit_id)
+          // Get all departments in organization
+          const { data: depts } = await supabase
+            .from('org_units')
+            .select('id, name, unit_type, lead_user_id')
+            .eq('organization_id', profile.organization_id)
+            .eq('active', true)
+            .order('name')
 
-            // Get all members in this subtree (this dept + children)
-            const { data: members } = await supabase
-              .from('users')
-              .select('id')
-              .eq('organization_id', profile.organization_id)
-              .in('org_unit_id', [profile.org_unit_id, ...(childDepts?.map(d => d.id) || [])])
+          setDepartments(depts || [])
+          setStats((s) => ({ ...s, totalDepartments: depts?.length || 0 }))
 
-            setStats({
-              subdepts: childDepts?.length || 0,
-              total_members: members?.length || 0,
-            })
-          }
+          // Get total members count
+          const { count: membersCount } = await supabase
+            .from('users')
+            .select('*', { count: 'exact', head: true })
+            .eq('organization_id', profile.organization_id)
+
+          setStats((s) => ({ ...s, totalMembers: membersCount || 0 }))
+
+          // Get pending approvals count
+          const { count: approvalsCount } = await supabase
+            .from('approvals')
+            .select('*', { count: 'exact', head: true })
+            .eq('status', 'PENDING')
+
+          setStats((s) => ({ ...s, activeApprovals: approvalsCount || 0 }))
         }
       } catch (err) {
-        console.error('Error loading dashboard:', err)
+        console.error('Error loading dean dashboard:', err)
       } finally {
         setIsLoading(false)
       }
     }
 
     loadDashboard()
-  }, [supabase])
+  }, [supabase, router])
 
   if (isLoading) {
     return (
@@ -81,87 +93,136 @@ export default function DeanDashboard() {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold">Dean Dashboard</h1>
-        <p className="text-muted-foreground mt-2">
-          {unit?.name} • Multi-Department Oversight
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Institution Overview</h1>
+          <p className="text-muted-foreground mt-2">
+            {organization?.name} • Dean View
+          </p>
+        </div>
       </div>
 
       {/* Key Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Subdepartments</CardTitle>
-            <Building2 className="h-4 w-4 text-primary" />
+            <CardTitle className="text-sm font-medium">Total Departments</CardTitle>
+            <Building2 className="h-4 w-4 text-blue-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.subdepts}</div>
-            <p className="text-xs text-muted-foreground">Departments under this dean</p>
+            <div className="text-2xl font-bold">{stats.totalDepartments}</div>
+            <p className="text-xs text-muted-foreground">Org units</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Members</CardTitle>
-            <Users className="h-4 w-4 text-blue-600" />
+            <Users className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.total_members}</div>
-            <p className="text-xs text-muted-foreground">Across all departments</p>
+            <div className="text-2xl font-bold">{stats.totalMembers}</div>
+            <p className="text-xs text-muted-foreground">Active users</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Pending Approvals</CardTitle>
+            <AlertCircle className="h-4 w-4 text-orange-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.activeApprovals}</div>
+            <p className="text-xs text-muted-foreground">Awaiting review</p>
           </CardContent>
         </Card>
       </div>
 
       {/* Main Tabs */}
-      <Tabs defaultValue="overview" className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="approvals">Escalations</TabsTrigger>
-          <TabsTrigger value="comparison">Cross-Dept Comparison</TabsTrigger>
+      <Tabs defaultValue="departments" className="w-full">
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="departments">Departments</TabsTrigger>
+          <TabsTrigger value="approvals">Approvals</TabsTrigger>
+          <TabsTrigger value="reports">Reports</TabsTrigger>
+          <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="overview">
-          <Card>
-            <CardHeader>
-              <CardTitle>Subtree Dashboard</CardTitle>
-              <CardDescription>Aggregate view of all departments and performance metrics within your scope</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-col items-center justify-center py-12">
-                <TrendingUp className="h-12 w-12 text-muted-foreground/50 mb-4" />
-                <p className="text-muted-foreground mb-4">Aggregated metrics coming soon</p>
-                <Button variant="outline">View Details</Button>
-              </div>
-            </CardContent>
-          </Card>
+        <TabsContent value="departments" className="space-y-4">
+          {departments.length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12">
+                <Building2 className="h-12 w-12 text-muted-foreground/50 mb-4" />
+                <p className="text-muted-foreground mb-4">No departments created yet</p>
+                <Button variant="outline">Create Department</Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {departments.map((dept) => (
+                <Card key={dept.id}>
+                  <CardHeader>
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <CardTitle>{dept.name}</CardTitle>
+                        <CardDescription>{dept.unit_type}</CardDescription>
+                      </div>
+                      <Building2 className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-sm text-muted-foreground mb-4">
+                      Lead assigned: {dept.lead_user_id ? 'Yes' : 'No'}
+                    </div>
+                    <Button variant="outline" size="sm" className="w-full">
+                      View Details
+                    </Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="approvals">
           <Card>
             <CardHeader>
-              <CardTitle>Escalations from Leads</CardTitle>
-              <CardDescription>Review and approve escalations from OrgUnitLeads under your authority</CardDescription>
+              <CardTitle>Institution Approvals</CardTitle>
+              <CardDescription>Review major organizational decisions</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="flex flex-col items-center justify-center py-12">
                 <AlertCircle className="h-12 w-12 text-muted-foreground/50 mb-4" />
-                <p className="text-muted-foreground mb-4">No pending escalations</p>
+                <p className="text-muted-foreground mb-4">No pending approvals</p>
               </div>
             </CardContent>
           </Card>
         </TabsContent>
 
-        <TabsContent value="comparison">
+        <TabsContent value="reports">
           <Card>
             <CardHeader>
-              <CardTitle>Cross-Department Analysis</CardTitle>
-              <CardDescription>Compare performance, token circulation, and metrics across departments</CardDescription>
+              <CardTitle>Institution Reports</CardTitle>
+              <CardDescription>View analytics and performance metrics across all departments</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="flex flex-col items-center justify-center py-12">
                 <TrendingUp className="h-12 w-12 text-muted-foreground/50 mb-4" />
-                <p className="text-muted-foreground mb-4">Comparison view coming soon</p>
+                <p className="text-muted-foreground mb-4">Reports analytics coming soon</p>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="settings">
+          <Card>
+            <CardHeader>
+              <CardTitle>Institution Settings</CardTitle>
+              <CardDescription>Configure organization-wide policies</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-col items-center justify-center py-12">
+                <Building2 className="h-12 w-12 text-muted-foreground/50 mb-4" />
+                <p className="text-muted-foreground mb-4">Settings configuration coming soon</p>
               </div>
             </CardContent>
           </Card>

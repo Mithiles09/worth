@@ -61,6 +61,7 @@ export async function POST(req: NextRequest) {
         name: organizationName.trim(),
         type: 'ENTERPRISE', // Matches custom type options explicitly [Page 8]
         template_key: 'GENERIC',
+        creator_id: userId, // <-- Set creator to this admin user
         version: 1,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -8,18 +9,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Loader2, Wallet, DollarSign, TrendingUp, AlertCircle } from 'lucide-react'
 
 export default function FinanceDashboard() {
+  const router = useRouter()
   const [user, setUser] = useState<any>(null)
   const [organization, setOrganization] = useState<any>(null)
-  const [wallets, setWallets] = useState<any[]>([])
+  const [stats, setStats] = useState({ salaryPool: 0, loanPool: 0, totalTransactions: 0 })
   const [isLoading, setIsLoading] = useState(true)
   const supabase = createClient()
 
   useEffect(() => {
     async function loadDashboard() {
       try {
-        // Get current auth user
         const { data: { user: authUser } } = await supabase.auth.getUser()
-        if (!authUser) return
+        if (!authUser) {
+          router.push('/login')
+          return
+        }
 
         // Get user profile
         const { data: profile } = await supabase
@@ -40,24 +44,43 @@ export default function FinanceDashboard() {
 
           if (org) setOrganization(org)
 
-          // Get all organizational wallets (SALARY_POOL, LOAN_POOL)
-          const { data: poolWallets } = await supabase
+          // Get salary pool wallet
+          const { data: salaryPoolWallet } = await supabase
             .from('wallets')
-            .select('id, balance, purpose')
+            .select('balance')
             .eq('organization_id', profile.organization_id)
-            .in('purpose', ['SALARY_POOL', 'LOAN_POOL'])
+            .eq('purpose', 'SALARY_POOL')
+            .maybeSingle()
 
-          setWallets(poolWallets || [])
+          // Get loan pool wallet
+          const { data: loanPoolWallet } = await supabase
+            .from('wallets')
+            .select('balance')
+            .eq('organization_id', profile.organization_id)
+            .eq('purpose', 'LOAN_POOL')
+            .maybeSingle()
+
+          // Get transaction count
+          const { count: transactionCount } = await supabase
+            .from('transactions')
+            .select('*', { count: 'exact', head: true })
+            .eq('organization_id', profile.organization_id)
+
+          setStats({
+            salaryPool: salaryPoolWallet?.balance || 0,
+            loanPool: loanPoolWallet?.balance || 0,
+            totalTransactions: transactionCount || 0,
+          })
         }
       } catch (err) {
-        console.error('Error loading dashboard:', err)
+        console.error('Error loading finance dashboard:', err)
       } finally {
         setIsLoading(false)
       }
     }
 
     loadDashboard()
-  }, [supabase])
+  }, [supabase, router])
 
   if (isLoading) {
     return (
@@ -67,28 +90,27 @@ export default function FinanceDashboard() {
     )
   }
 
-  const salaryPool = wallets.find(w => w.purpose === 'SALARY_POOL')
-  const loanPool = wallets.find(w => w.purpose === 'LOAN_POOL')
-
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold">Finance Dashboard</h1>
-        <p className="text-muted-foreground mt-2">
-          {organization?.name} • Financial Operations
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Finance Dashboard</h1>
+          <p className="text-muted-foreground mt-2">
+            {organization?.name} • Financial Operations
+          </p>
+        </div>
       </div>
 
       {/* Pool Balances */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Salary Pool</CardTitle>
             <DollarSign className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">{salaryPool?.balance || 0}</div>
+            <div className="text-2xl font-bold">{stats.salaryPool}</div>
             <p className="text-xs text-muted-foreground">WORK tokens available</p>
           </CardContent>
         </Card>
@@ -99,8 +121,19 @@ export default function FinanceDashboard() {
             <AlertCircle className="h-4 w-4 text-orange-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">{loanPool?.balance || 0}</div>
+            <div className="text-2xl font-bold">{stats.loanPool}</div>
             <p className="text-xs text-muted-foreground">WORK tokens reserved</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Transactions</CardTitle>
+            <TrendingUp className="h-4 w-4 text-blue-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.totalTransactions}</div>
+            <p className="text-xs text-muted-foreground">All-time record</p>
           </CardContent>
         </Card>
       </div>

@@ -51,10 +51,11 @@ export default function AdminDashboard() {
           email: adminData.email,
         })
 
-        // Fetch all customer networks across your systems [Page 1]
+        // Fetch only organizations created by this admin [Page 1]
         const { data: orgs } = await supabase
           .from('organizations')
           .select('*')
+          .eq('creator_id', authUser.id)
 
         setOrganizations(orgs || [])
       } catch (err) {

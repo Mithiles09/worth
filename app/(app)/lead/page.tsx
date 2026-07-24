@@ -1,25 +1,31 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Loader2, Users, CheckCircle, AlertCircle, Wallet } from 'lucide-react'
+import { Loader2, Users, Wallet, AlertCircle, CheckCircle, BarChart3 } from 'lucide-react'
 
 export default function LeadDashboard() {
+  const router = useRouter()
   const [user, setUser] = useState<any>(null)
-  const [unit, setUnit] = useState<any>(null)
-  const [stats, setStats] = useState({ team_members: 0, pending_verifications: 0, tasks_completed: 0 })
+  const [organization, setOrganization] = useState<any>(null)
+  const [department, setDepartment] = useState<any>(null)
+  const [stats, setStats] = useState({ teamMembers: 0, pendingApprovals: 0, completedTasks: 0 })
+  const [teamMembers, setTeamMembers] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const supabase = createClient()
 
   useEffect(() => {
     async function loadDashboard() {
       try {
-        // Get current auth user
         const { data: { user: authUser } } = await supabase.auth.getUser()
-        if (!authUser) return
+        if (!authUser) {
+          router.push('/login')
+          return
+        }
 
         // Get user profile
         const { data: profile } = await supabase
@@ -31,38 +37,63 @@ export default function LeadDashboard() {
         if (profile) {
           setUser(profile)
 
-          // Get org unit details
+          // Get organization details
+          const { data: org } = await supabase
+            .from('organizations')
+            .select('id, name, type')
+            .eq('id', profile.organization_id)
+            .single()
+
+          if (org) setOrganization(org)
+
+          // Get department (org_unit) details
           if (profile.org_unit_id) {
-            const { data: orgUnit } = await supabase
+            const { data: dept } = await supabase
               .from('org_units')
-              .select('id, name, parent_id')
+              .select('id, name, unit_type')
               .eq('id', profile.org_unit_id)
               .single()
 
-            if (orgUnit) setUnit(orgUnit)
+            if (dept) setDepartment(dept)
 
-            // Get team stats
-            const { data: teamMembers } = await supabase
+            // Get team members in this department
+            const { data: members } = await supabase
               .from('users')
-              .select('id')
+              .select('id, name, email, status, progress_percentage, quality_score')
               .eq('org_unit_id', profile.org_unit_id)
-              .neq('id', authUser.id)
+              .order('name')
 
-            setStats(prev => ({
-              ...prev,
-              team_members: teamMembers?.length || 0,
-            }))
+            setTeamMembers(members || [])
+            setStats((s) => ({ ...s, teamMembers: members?.length || 0 }))
           }
+
+          // Get pending approvals count
+          const { count: pendingCount } = await supabase
+            .from('approvals')
+            .select('*', { count: 'exact', head: true })
+            .eq('assigned_to_user_id', authUser.id)
+            .eq('status', 'PENDING')
+
+          setStats((s) => ({ ...s, pendingApprovals: pendingCount || 0 }))
+
+          // Get completed tasks count
+          const { count: completedCount } = await supabase
+            .from('tasks')
+            .select('*', { count: 'exact', head: true })
+            .eq('created_by', authUser.id)
+            .eq('status', 'COMPLETED')
+
+          setStats((s) => ({ ...s, completedTasks: completedCount || 0 }))
         }
       } catch (err) {
-        console.error('Error loading dashboard:', err)
+        console.error('Error loading lead dashboard:', err)
       } finally {
         setIsLoading(false)
       }
     }
 
     loadDashboard()
-  }, [supabase])
+  }, [supabase, router])
 
   if (isLoading) {
     return (
@@ -75,11 +106,14 @@ export default function LeadDashboard() {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold">Department Manager</h1>
-        <p className="text-muted-foreground mt-2">
-          {unit?.name} • {user?.email}
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Department Dashboard</h1>
+          <p className="text-muted-foreground mt-2">
+            {organization?.name} • {department?.name} • {user?.name}
+          </p>
+        </div>
+        <Button className="gap-2">Manage Team</Button>
       </div>
 
       {/* Key Metrics */}
@@ -87,97 +121,124 @@ export default function LeadDashboard() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Team Members</CardTitle>
-            <Users className="h-4 w-4 text-primary" />
+            <Users className="h-4 w-4 text-blue-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.team_members}</div>
-            <p className="text-xs text-muted-foreground">Direct reports</p>
+            <div className="text-2xl font-bold">{stats.teamMembers}</div>
+            <p className="text-xs text-muted-foreground">In {department?.name}</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Pending Verifications</CardTitle>
+            <CardTitle className="text-sm font-medium">Pending Approvals</CardTitle>
             <AlertCircle className="h-4 w-4 text-orange-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.pending_verifications}</div>
-            <p className="text-xs text-muted-foreground">Awaiting your review</p>
+            <div className="text-2xl font-bold">{stats.pendingApprovals}</div>
+            <p className="text-xs text-muted-foreground">Awaiting action</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Tasks Completed</CardTitle>
+            <CardTitle className="text-sm font-medium">Completed Tasks</CardTitle>
             <CheckCircle className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.tasks_completed}</div>
+            <div className="text-2xl font-bold">{stats.completedTasks}</div>
             <p className="text-xs text-muted-foreground">This month</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Dual Context Tabs */}
-      <Tabs defaultValue="manager" className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="manager">Manager Context</TabsTrigger>
-          <TabsTrigger value="employee">Employee Context</TabsTrigger>
+      {/* Main Tabs */}
+      <Tabs defaultValue="team" className="w-full">
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="team">Team</TabsTrigger>
+          <TabsTrigger value="approvals">Approvals</TabsTrigger>
+          <TabsTrigger value="tasks">Tasks</TabsTrigger>
+          <TabsTrigger value="performance">Performance</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="manager" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Team Verification Queue</CardTitle>
-              <CardDescription>Review task completions from your team members</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-col items-center justify-center py-12">
-                <CheckCircle className="h-12 w-12 text-muted-foreground/50 mb-4" />
-                <p className="text-muted-foreground mb-4">No pending verifications</p>
-                <Button variant="outline">View Queue</Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Team Performance</CardTitle>
-              <CardDescription>Monitor individual progress and metrics</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-col items-center justify-center py-12">
+        <TabsContent value="team" className="space-y-4">
+          {teamMembers.length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12">
                 <Users className="h-12 w-12 text-muted-foreground/50 mb-4" />
-                <p className="text-muted-foreground mb-4">Team analytics coming soon</p>
+                <p className="text-muted-foreground mb-4">No team members yet</p>
+                <Button variant="outline">Invite Members</Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-2">
+              {teamMembers.map((member) => (
+                <Card key={member.id}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium">{member.name}</p>
+                        <p className="text-sm text-muted-foreground">{member.email}</p>
+                      </div>
+                      <div className="flex gap-4 text-sm">
+                        <div className="text-right">
+                          <p className="text-muted-foreground">Status</p>
+                          <p className="font-medium">{member.status}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-muted-foreground">Quality</p>
+                          <p className="font-medium">{member.quality_score}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="approvals">
+          <Card>
+            <CardHeader>
+              <CardTitle>Task Approvals</CardTitle>
+              <CardDescription>Review and approve team member submissions</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-col items-center justify-center py-12">
+                <AlertCircle className="h-12 w-12 text-muted-foreground/50 mb-4" />
+                <p className="text-muted-foreground mb-4">No pending approvals</p>
               </div>
             </CardContent>
           </Card>
         </TabsContent>
 
-        <TabsContent value="employee" className="space-y-4">
+        <TabsContent value="tasks">
           <Card>
             <CardHeader>
-              <CardTitle>Your Schedule & Progress</CardTitle>
-              <CardDescription>Your own work assignments and completion status</CardDescription>
+              <CardTitle>Department Tasks</CardTitle>
+              <CardDescription>Create and manage team tasks</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="flex flex-col items-center justify-center py-12">
-                <Wallet className="h-12 w-12 text-muted-foreground/50 mb-4" />
-                <p className="text-muted-foreground mb-4">No scheduled work</p>
-                <Button variant="outline">View Tasks</Button>
+                <BarChart3 className="h-12 w-12 text-muted-foreground/50 mb-4" />
+                <p className="text-muted-foreground mb-4">No tasks created yet</p>
+                <Button variant="outline">Create Task</Button>
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
 
+        <TabsContent value="performance">
           <Card>
             <CardHeader>
-              <CardTitle>Available Tasks</CardTitle>
-              <CardDescription>Self-nominate for open opportunities</CardDescription>
+              <CardTitle>Team Performance</CardTitle>
+              <CardDescription>Track team progress and metrics</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="flex flex-col items-center justify-center py-12">
-                <AlertCircle className="h-12 w-12 text-muted-foreground/50 mb-4" />
-                <p className="text-muted-foreground mb-4">No open tasks</p>
+                <BarChart3 className="h-12 w-12 text-muted-foreground/50 mb-4" />
+                <p className="text-muted-foreground">Performance analytics coming soon</p>
               </div>
             </CardContent>
           </Card>

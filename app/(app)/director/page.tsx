@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Loader2, Building2, Users, Wallet, TrendingUp, Settings } from 'lucide-react'
+import { OrgTreeBuilder } from '@/components/org/OrgTreeBuilder'
 
 export default function DirectorDashboard() {
   const router = useRouter()
@@ -161,18 +162,16 @@ export default function DirectorDashboard() {
           <TabsTrigger value="reports">Reports</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="structure">
+        <TabsContent value="structure" className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle>Institution Structure</CardTitle>
               <CardDescription>Manage departments and organizational hierarchy</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="flex flex-col items-center justify-center py-12">
-                <Building2 className="h-12 w-12 text-muted-foreground/50 mb-4" />
-                <p className="text-muted-foreground mb-4">Structure management coming soon</p>
-                <Button variant="outline">Configure Structure</Button>
-              </div>
+              {user && organization && (
+                <OrgTreeBuilder organizationId={organization.id} userId={user.id} />
+              )}
             </CardContent>
           </Card>
         </TabsContent>
